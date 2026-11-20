@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 2 Interactive Input &amp; Display"
-        Height="768" Width="1200"
+        Title="RemoteDesk Viewer - Phase 3 LAN WebRTC Peer-to-Peer"
+        Height="800" Width="1280"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
         Focusable="True"
@@ -22,41 +22,76 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Top Header Bar -->
+        <!-- Top Header & Connection Bar -->
         <Border Grid.Row="0" Background="#27272A" Padding="12,8" BorderBrush="#3F3F46" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
+                <!-- Left: Branding & Remote Host Connection Controls -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                    <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,16,0" VerticalAlignment="Center"/>
-                    <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0">
-                        <TextBlock Text="Phase 2: Remote Input" FontSize="11" Foreground="#9CA3AF"/>
+                    <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,14,0" VerticalAlignment="Center"/>
+                    <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="Phase 3: WebRTC P2P" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
-                    <TextBlock Text="Display:" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <ComboBox ItemsSource="{Binding AvailableDisplays}" 
-                              SelectedIndex="{Binding SelectedDisplayIndex}" 
-                              Width="180" Height="26" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                    
-                    <Border Background="#1E293B" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <TextBlock Text="{Binding CursorPositionText}" FontSize="11" Foreground="#38BDF8"/>
-                    </Border>
-                </StackPanel>
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <Button Command="{Binding ToggleLoopbackCommand}" 
-                            Height="32" Padding="16,4" FontWeight="SemiBold" Cursor="Hand" BorderThickness="0">
+                    <!-- Remote Host ID Input -->
+                    <TextBlock Text="Host ID:" Foreground="#E5E7EB" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,6,0"/>
+                    <TextBox Text="{Binding TargetHostId, UpdateSourceTrigger=PropertyChanged}" 
+                             Width="110" Height="28" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                             FontFamily="Consolas" FontSize="13" FontWeight="Bold"
+                             Background="#18181B" Foreground="#38BDF8" BorderBrush="#4B5563" Margin="0,0,8,0"/>
+
+                    <!-- Connect / Disconnect Button -->
+                    <Button Command="{Binding ConnectRemoteCommand}" 
+                            Height="28" Padding="12,2" FontWeight="Bold" Cursor="Hand" BorderThickness="0" Margin="0,0,16,0">
                         <Button.Style>
                             <Style TargetType="Button">
-                                <Setter Property="Background" Value="#2563EB"/>
+                                <Setter Property="Background" Value="#16A34A"/>
                                 <Setter Property="Foreground" Value="White"/>
-                                <Setter Property="Content" Value="▶  Start Loopback"/>
+                                <Setter Property="Content" Value="⚡ Connect"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsLoopbackActive}" Value="True">
+                                    <DataTrigger Binding="{Binding IsConnecting}" Value="True">
+                                        <Setter Property="Background" Value="#D97706"/>
+                                        <Setter Property="Content" Value="Connecting..."/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsRemoteSessionActive}" Value="True">
                                         <Setter Property="Background" Value="#DC2626"/>
-                                        <Setter Property="Content" Value="⏹  Stop Loopback"/>
+                                        <Setter Property="Content" Value="❌ Disconnect"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
                     </Button>
+
+                    <Separator Style="{StaticResource {x:Static ToolBar.SeparatorStyleKey}}" Background="#3F3F46" Margin="0,0,16,0"/>
+
+                    <!-- Local Loopback Diagnostics Section -->
+                    <TextBlock Text="Display:" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox ItemsSource="{Binding AvailableDisplays}" 
+                              SelectedIndex="{Binding SelectedDisplayIndex}" 
+                              Width="150" Height="26" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                    <Button Command="{Binding ToggleLoopbackCommand}" 
+                            Height="28" Padding="10,2" FontWeight="SemiBold" Cursor="Hand" BorderThickness="0" Margin="0,0,12,0">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="#3B82F6"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="Content" Value="▶ Loopback"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoopbackActive}" Value="True">
+                                        <Setter Property="Background" Value="#EF4444"/>
+                                        <Setter Property="Content" Value="⏹ Stop"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+
+                <!-- Right: Status / Cursor Indicator -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Border Background="#1E293B" CornerRadius="4" Padding="8,4" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding CursorPositionText}" FontSize="11" Foreground="#38BDF8"/>
+                    </Border>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -87,17 +122,17 @@
 
             <!-- Placeholder when inactive -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" 
-                        Visibility="{Binding IsLoopbackActive, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}">
-                <TextBlock Text="🖥" FontSize="54" HorizontalAlignment="Center" Foreground="#4B5563" Margin="0,0,0,12"/>
-                <TextBlock Text="Local Screen Capture Pipeline Inactive" FontSize="18" FontWeight="SemiBold" Foreground="#9CA3AF" HorizontalAlignment="Center"/>
-                <TextBlock Text="Click 'Start Loopback' above to stream, encode, and decode your desktop with interactive control." FontSize="13" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                        Visibility="{Binding IsSessionActive, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}">
+                <TextBlock Text="🌐" FontSize="56" HorizontalAlignment="Center" Foreground="#4B5563" Margin="0,0,0,12"/>
+                <TextBlock Text="No Active Remote Desktop Session" FontSize="20" FontWeight="SemiBold" Foreground="#9CA3AF" HorizontalAlignment="Center"/>
+                <TextBlock Text="Enter a Target Host ID and click 'Connect' to start a WebRTC remote desktop session, or click 'Loopback' to test locally." FontSize="13" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,6,0,0"/>
             </StackPanel>
 
             <!-- Floating Stats HUD Overlay (Top Right) -->
             <Border HorizontalAlignment="Right" VerticalAlignment="Top" 
                     Margin="16" Background="#CC18181B" BorderBrush="#3F3F46" BorderThickness="1" 
                     CornerRadius="8" Padding="12,10"
-                    Visibility="{Binding IsLoopbackActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+                    Visibility="{Binding IsSessionActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
                 <StackPanel Orientation="Vertical">
                     <TextBlock Text="REAL-TIME METRICS" FontSize="10" FontWeight="Bold" Foreground="#9CA3AF" Margin="0,0,0,8"/>
                     

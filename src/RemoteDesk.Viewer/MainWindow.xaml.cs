@@ -29,7 +29,7 @@ public partial class MainWindow : Window
 
     private void OnVideoMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null || _viewModel.VideoImage == null) return;
+        if (!_viewModel.IsSessionActive || _viewModel.VideoImage == null) return;
 
         var pos = e.GetPosition(VideoImageControl);
         var actualW = VideoImageControl.ActualWidth;
@@ -40,38 +40,66 @@ public partial class MainWindow : Window
         var pixelX = (int)(pos.X * _viewModel.VideoImage.PixelWidth / actualW);
         var pixelY = (int)(pos.Y * _viewModel.VideoImage.PixelHeight / actualH);
 
-        _viewModel.Injector.InjectMouseMove(pixelX, pixelY, _viewModel.VideoImage.PixelWidth, _viewModel.VideoImage.PixelHeight);
+        if (_viewModel.IsRemoteSessionActive)
+        {
+            _viewModel.SendRemoteMouseMove(pixelX, pixelY, _viewModel.VideoImage.PixelWidth, _viewModel.VideoImage.PixelHeight);
+        }
+        else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+        {
+            _viewModel.Injector.InjectMouseMove(pixelX, pixelY, _viewModel.VideoImage.PixelWidth, _viewModel.VideoImage.PixelHeight);
+        }
     }
 
     private void OnVideoMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
         var btn = MapMouseButton(e.ChangedButton);
         if (btn.HasValue)
         {
-            _viewModel.Injector.InjectMouseButton(btn.Value, ButtonState.Down);
+            if (_viewModel.IsRemoteSessionActive)
+            {
+                _viewModel.SendRemoteMouseButton(btn.Value, ButtonState.Down);
+            }
+            else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+            {
+                _viewModel.Injector.InjectMouseButton(btn.Value, ButtonState.Down);
+            }
             e.Handled = true;
         }
     }
 
     private void OnVideoMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
         var btn = MapMouseButton(e.ChangedButton);
         if (btn.HasValue)
         {
-            _viewModel.Injector.InjectMouseButton(btn.Value, ButtonState.Up);
+            if (_viewModel.IsRemoteSessionActive)
+            {
+                _viewModel.SendRemoteMouseButton(btn.Value, ButtonState.Up);
+            }
+            else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+            {
+                _viewModel.Injector.InjectMouseButton(btn.Value, ButtonState.Up);
+            }
             e.Handled = true;
         }
     }
 
     private void OnVideoMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
-        _viewModel.Injector.InjectMouseWheel(0, e.Delta);
+        if (_viewModel.IsRemoteSessionActive)
+        {
+            _viewModel.SendRemoteMouseWheel(0, e.Delta);
+        }
+        else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+        {
+            _viewModel.Injector.InjectMouseWheel(0, e.Delta);
+        }
         e.Handled = true;
     }
 
@@ -90,7 +118,7 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
@@ -98,14 +126,21 @@ public partial class MainWindow : Window
 
         if (scanCode > 0)
         {
-            _viewModel.Injector.InjectKey((ushort)scanCode, isExtended, KeyState.Down);
+            if (_viewModel.IsRemoteSessionActive)
+            {
+                _viewModel.SendRemoteKey((ushort)scanCode, isExtended, KeyState.Down);
+            }
+            else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+            {
+                _viewModel.Injector.InjectKey((ushort)scanCode, isExtended, KeyState.Down);
+            }
             e.Handled = true;
         }
     }
 
     private void OnWindowKeyUp(object sender, KeyEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
@@ -113,18 +148,32 @@ public partial class MainWindow : Window
 
         if (scanCode > 0)
         {
-            _viewModel.Injector.InjectKey((ushort)scanCode, isExtended, KeyState.Up);
+            if (_viewModel.IsRemoteSessionActive)
+            {
+                _viewModel.SendRemoteKey((ushort)scanCode, isExtended, KeyState.Up);
+            }
+            else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+            {
+                _viewModel.Injector.InjectKey((ushort)scanCode, isExtended, KeyState.Up);
+            }
             e.Handled = true;
         }
     }
 
     private void OnWindowTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (!_viewModel.IsLoopbackActive || _viewModel.Injector == null) return;
+        if (!_viewModel.IsSessionActive) return;
 
         if (!string.IsNullOrEmpty(e.Text))
         {
-            _viewModel.Injector.InjectUnicodeText(e.Text);
+            if (_viewModel.IsRemoteSessionActive)
+            {
+                _viewModel.SendRemoteUnicodeText(e.Text);
+            }
+            else if (_viewModel.IsLoopbackActive && _viewModel.Injector != null)
+            {
+                _viewModel.Injector.InjectUnicodeText(e.Text);
+            }
             e.Handled = true;
         }
     }

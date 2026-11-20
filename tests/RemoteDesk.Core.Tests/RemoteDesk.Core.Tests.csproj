@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RemoteDesk.Core\RemoteDesk.Core.csproj" />
+    <ProjectReference Include="..\..\src\RemoteDesk.Transport.WebRtc\RemoteDesk.Transport.WebRtc.csproj" />
+    <ProjectReference Include="..\..\src\RemoteDesk.Server.Signaling\RemoteDesk.Server.Signaling.csproj" />
   </ItemGroup>
 
   <ItemGroup>
