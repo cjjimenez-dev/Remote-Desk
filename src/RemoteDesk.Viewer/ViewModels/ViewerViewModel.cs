@@ -21,6 +21,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private IScreenCapturer? _capturer;
     private IVideoEncoder? _encoder;
     private IVideoDecoder? _decoder;
+    private IInputInjector? _injector;
+    private EmergencyKillSwitch? _killSwitch;
+    private CursorTracker? _cursorTracker;
 
     private readonly DispatcherTimer _statsTimer;
     private int _framesThisInterval;
@@ -35,6 +38,12 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isLoopbackActive;
+
+    [ObservableProperty]
+    private bool _isInputEnabled = true;
+
+    [ObservableProperty]
+    private bool _isEmergencyKillTriggered;
 
     [ObservableProperty]
     private string _fpsText = "0.0 FPS";
@@ -55,9 +64,14 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private string _statusText = "Ready - Press 'Start Loopback' to test local pipeline";
 
     [ObservableProperty]
+    private string _cursorPositionText = "X: 0, Y: 0";
+
+    [ObservableProperty]
     private int _selectedDisplayIndex;
 
     public ObservableCollection<string> AvailableDisplays { get; } = [];
+
+    public IInputInjector? Injector => _injector;
 
     public ViewerViewModel(Dispatcher dispatcher)
     {
@@ -117,6 +131,18 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         }
     }
 
+    [RelayCommand]
+    private void ResetEmergencyKill()
+    {
+        if (_injector != null)
+        {
+            _injector.IsEnabled = true;
+        }
+        IsInputEnabled = true;
+        IsEmergencyKillTriggered = false;
+        StatusText = "Input control resumed.";
+    }
+
     private void StartLoopback()
     {
         try
@@ -128,6 +154,32 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             _encoder = new FFmpegH264Encoder();
             _decoder = new FFmpegH264Decoder();
+            _injector = new WindowsInputInjector();
+
+            var currentDisplay = _capturer.CurrentDisplay;
+            if (currentDisplay != null)
+            {
+                _injector.SetTargetDisplay(currentDisplay);
+            }
+
+            _killSwitch = new EmergencyKillSwitch(_injector);
+            _killSwitch.EmergencyKillTriggered += () =>
+            {
+                _dispatcher.Invoke(() =>
+                {
+                    IsEmergencyKillTriggered = true;
+                    IsInputEnabled = false;
+                    StatusText = "EMERGENCY KILL TRIGGERED: Input disabled by host user.";
+                });
+            };
+            _killSwitch.Start();
+
+            _cursorTracker = new CursorTracker();
+            _cursorTracker.CursorPositionChanged += pos =>
+            {
+                _dispatcher.Invoke(() => CursorPositionText = $"X: {pos.X}, Y: {pos.Y}");
+            };
+            _cursorTracker.Start();
 
             _capturer.FrameCaptured += OnFrameCaptured;
             _capturer.ErrorOccurred += err =>
@@ -139,7 +191,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             _statsTimer.Start();
 
             IsLoopbackActive = true;
-            StatusText = "Local loopback running: Capturer -> H.264 Encoder -> Decoder -> WPF D3D";
+            IsEmergencyKillTriggered = false;
+            IsInputEnabled = true;
+            StatusText = "Local loopback running with active input injection. Hotkey: Ctrl+Alt+Shift+Esc to kill.";
         }
         catch (Exception ex)
         {
@@ -229,6 +283,14 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     {
         _statsTimer.Stop();
 
+        _killSwitch?.Stop();
+        _killSwitch?.Dispose();
+        _killSwitch = null;
+
+        _cursorTracker?.Stop();
+        _cursorTracker?.Dispose();
+        _cursorTracker = null;
+
         if (_capturer != null)
         {
             _capturer.Stop();
@@ -241,6 +303,8 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
         _decoder?.Dispose();
         _decoder = null;
+
+        _injector = null;
 
         IsLoopbackActive = false;
         StatusText = "Loopback stopped.";

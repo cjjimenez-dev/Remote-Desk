@@ -17,6 +17,7 @@ public enum MessageType : ushort
     PermissionUpdate = 0x0003,
     HeartbeatPing = 0x0004,
     HeartbeatPong = 0x0005,
+    EmergencyStop = 0x0006,
 
     // Input (0x0100 - 0x01FF)
     MouseMove = 0x0100,
@@ -24,6 +25,8 @@ public enum MessageType : ushort
     MouseWheel = 0x0102,
     KeyState = 0x0103,
     TextUnicode = 0x0104,
+    CursorPosition = 0x0105,
+    CursorShape = 0x0106,
 
     // Clipboard (0x0200 - 0x02FF)
     ClipboardSync = 0x0200,

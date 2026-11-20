@@ -4,7 +4,10 @@ namespace RemoteDesk.Core.Interfaces;
 
 public interface IInputInjector
 {
-    void InjectMouseMove(int absoluteX, int absoluteY, int screenWidth, int screenHeight);
+    bool IsEnabled { get; set; }
+
+    void SetTargetDisplay(DisplayInfo display);
+    void InjectMouseMove(int targetX, int targetY, int clientWidth, int clientHeight);
     void InjectMouseButton(MouseButton button, ButtonState state);
     void InjectMouseWheel(int deltaX, int deltaY);
     void InjectKey(ushort scanCode, bool isExtended, KeyState state);

@@ -5,13 +5,18 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 1 Local Pipeline"
+        Title="RemoteDesk Viewer - Phase 2 Interactive Input &amp; Display"
         Height="768" Width="1200"
         Background="#18181B"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Focusable="True"
+        PreviewKeyDown="OnWindowKeyDown"
+        PreviewKeyUp="OnWindowKeyUp"
+        PreviewTextInput="OnWindowTextInput">
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
@@ -23,12 +28,16 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,16,0" VerticalAlignment="Center"/>
                     <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0">
-                        <TextBlock Text="Phase 1: Local Loopback" FontSize="11" Foreground="#9CA3AF"/>
+                        <TextBlock Text="Phase 2: Remote Input" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
                     <TextBlock Text="Display:" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <ComboBox ItemsSource="{Binding AvailableDisplays}" 
                               SelectedIndex="{Binding SelectedDisplayIndex}" 
                               Width="180" Height="26" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                    
+                    <Border Background="#1E293B" CornerRadius="4" Padding="6,2" VerticalAlignment="Center" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding CursorPositionText}" FontSize="11" Foreground="#38BDF8"/>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
@@ -52,18 +61,36 @@
             </DockPanel>
         </Border>
 
+        <!-- Emergency Kill Switch Alert Banner -->
+        <Border Grid.Row="1" Background="#7F1D1D" Padding="12,6" 
+                Visibility="{Binding IsEmergencyKillTriggered, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+            <DockPanel LastChildFill="True">
+                <Button DockPanel.Dock="Right" Command="{Binding ResetEmergencyKillCommand}" 
+                        Content="Resume Input" Background="#DC2626" Foreground="White" FontWeight="Bold" Padding="10,2" Cursor="Hand"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="⚠️ EMERGENCY KILL TRIGGERED: " FontWeight="Bold" Foreground="#FCA5A5" VerticalAlignment="Center"/>
+                    <TextBlock Text="Input injection was killed by host user via hotkey (Ctrl+Alt+Shift+Esc)." Foreground="#FEE2E2" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- Video Display Canvas -->
-        <Grid Grid.Row="1" Background="#09090B" ClipToBounds="True">
-            <Image Source="{Binding VideoImage}" 
+        <Grid Grid.Row="2" Background="#09090B" ClipToBounds="True">
+            <Image x:Name="VideoImageControl"
+                   Source="{Binding VideoImage}" 
                    Stretch="Uniform" 
-                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   MouseDown="OnVideoMouseDown"
+                   MouseUp="OnVideoMouseUp"
+                   MouseMove="OnVideoMouseMove"
+                   MouseWheel="OnVideoMouseWheel"/>
 
             <!-- Placeholder when inactive -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" 
                         Visibility="{Binding IsLoopbackActive, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}">
                 <TextBlock Text="🖥" FontSize="54" HorizontalAlignment="Center" Foreground="#4B5563" Margin="0,0,0,12"/>
                 <TextBlock Text="Local Screen Capture Pipeline Inactive" FontSize="18" FontWeight="SemiBold" Foreground="#9CA3AF" HorizontalAlignment="Center"/>
-                <TextBlock Text="Click 'Start Loopback' above to stream, encode, and decode your desktop in real-time." FontSize="13" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                <TextBlock Text="Click 'Start Loopback' above to stream, encode, and decode your desktop with interactive control." FontSize="13" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
             </StackPanel>
 
             <!-- Floating Stats HUD Overlay (Top Right) -->
@@ -104,7 +131,7 @@
         </Grid>
 
         <!-- Bottom Status Bar -->
-        <Border Grid.Row="2" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
             <DockPanel LastChildFill="True">
                 <TextBlock Text="{Binding StatusText}" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center"/>
             </DockPanel>
