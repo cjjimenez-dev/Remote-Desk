@@ -10,8 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FFmpeg.AutoGen" />
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="SIPSorceryMedia.FFmpeg" />
   </ItemGroup>
 
 </Project>

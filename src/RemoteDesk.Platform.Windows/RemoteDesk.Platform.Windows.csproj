@@ -12,7 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FFmpeg.AutoGen" />
     <PackageReference Include="Serilog" />
+    <PackageReference Include="SIPSorceryMedia.FFmpeg" />
+    <PackageReference Include="Vortice.Direct3D11" />
+    <PackageReference Include="Vortice.DXGI" />
   </ItemGroup>
 
 </Project>

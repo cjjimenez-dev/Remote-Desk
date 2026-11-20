@@ -3,10 +3,111 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:RemoteDesk.Viewer"
+        xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="RemoteDesk Viewer - Phase 1 Local Pipeline"
+        Height="768" Width="1200"
+        Background="#18181B"
+        WindowStartupLocation="CenterScreen">
 
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top Header Bar -->
+        <Border Grid.Row="0" Background="#27272A" Padding="12,8" BorderBrush="#3F3F46" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,16,0" VerticalAlignment="Center"/>
+                    <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0">
+                        <TextBlock Text="Phase 1: Local Loopback" FontSize="11" Foreground="#9CA3AF"/>
+                    </Border>
+                    <TextBlock Text="Display:" Foreground="#D1D5DB" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox ItemsSource="{Binding AvailableDisplays}" 
+                              SelectedIndex="{Binding SelectedDisplayIndex}" 
+                              Width="180" Height="26" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Button Command="{Binding ToggleLoopbackCommand}" 
+                            Height="32" Padding="16,4" FontWeight="SemiBold" Cursor="Hand" BorderThickness="0">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="#2563EB"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="Content" Value="▶  Start Loopback"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoopbackActive}" Value="True">
+                                        <Setter Property="Background" Value="#DC2626"/>
+                                        <Setter Property="Content" Value="⏹  Stop Loopback"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Video Display Canvas -->
+        <Grid Grid.Row="1" Background="#09090B" ClipToBounds="True">
+            <Image Source="{Binding VideoImage}" 
+                   Stretch="Uniform" 
+                   RenderOptions.BitmapScalingMode="HighQuality"/>
+
+            <!-- Placeholder when inactive -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" 
+                        Visibility="{Binding IsLoopbackActive, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}">
+                <TextBlock Text="🖥" FontSize="54" HorizontalAlignment="Center" Foreground="#4B5563" Margin="0,0,0,12"/>
+                <TextBlock Text="Local Screen Capture Pipeline Inactive" FontSize="18" FontWeight="SemiBold" Foreground="#9CA3AF" HorizontalAlignment="Center"/>
+                <TextBlock Text="Click 'Start Loopback' above to stream, encode, and decode your desktop in real-time." FontSize="13" Foreground="#6B7280" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+            </StackPanel>
+
+            <!-- Floating Stats HUD Overlay (Top Right) -->
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" 
+                    Margin="16" Background="#CC18181B" BorderBrush="#3F3F46" BorderThickness="1" 
+                    CornerRadius="8" Padding="12,10"
+                    Visibility="{Binding IsLoopbackActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+                <StackPanel Orientation="Vertical">
+                    <TextBlock Text="REAL-TIME METRICS" FontSize="10" FontWeight="Bold" Foreground="#9CA3AF" Margin="0,0,0,8"/>
+                    
+                    <!-- Badges Row -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <!-- FPS Badge -->
+                        <Border Background="#064E3B" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding FpsText}" FontWeight="Bold" Foreground="#34D399" FontSize="12"/>
+                        </Border>
+                        <!-- Latency Badge -->
+                        <Border Background="#1E3A8A" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding LatencyText}" FontWeight="Bold" Foreground="#60A5FA" FontSize="12"/>
+                        </Border>
+                        <!-- Bitrate Badge -->
+                        <Border Background="#4C1D95" CornerRadius="4" Padding="6,2">
+                            <TextBlock Text="{Binding BitrateText}" FontWeight="Bold" Foreground="#C084FC" FontSize="12"/>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="Timings: " Foreground="#9CA3AF" FontSize="11"/>
+                        <TextBlock Text="{Binding EncodeDecodeText}" Foreground="#FBBF24" FontSize="11" FontWeight="SemiBold"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Resolution: " Foreground="#9CA3AF" FontSize="11"/>
+                        <TextBlock Text="{Binding ResolutionText}" Foreground="#E5E7EB" FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Bottom Status Bar -->
+        <Border Grid.Row="2" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
+            <DockPanel LastChildFill="True">
+                <TextBlock Text="{Binding StatusText}" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
     </Grid>
 </Window>

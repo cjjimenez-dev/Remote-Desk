@@ -10,13 +10,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RemoteDesk.Core\RemoteDesk.Core.csproj" />
+    <ProjectReference Include="..\RemoteDesk.Platform.Windows\RemoteDesk.Platform.Windows.csproj" />
     <ProjectReference Include="..\RemoteDesk.Transport.WebRtc\RemoteDesk.Transport.WebRtc.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="FFmpeg.AutoGen" />
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="SIPSorceryMedia.FFmpeg" />
   </ItemGroup>
 
 </Project>
