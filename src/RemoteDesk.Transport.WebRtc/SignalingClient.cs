@@ -98,6 +98,12 @@ public sealed class SignalingClient : IAsyncDisposable
         Logger.Information("Connected to signaling server at {Url}. Connection ID: {Id}", _serverUrl, _hub.ConnectionId);
     }
 
+    public async Task<List<RemoteDesk.Core.Models.IceServerConfig>> GetIceServersAsync(string deviceId, CancellationToken ct = default)
+    {
+        if (_hub is null) throw new InvalidOperationException("Not connected to signaling server.");
+        return await _hub.InvokeAsync<List<RemoteDesk.Core.Models.IceServerConfig>>("GetIceServers", deviceId, ct);
+    }
+
     public async Task<bool> RegisterHostAsync(string hostId, string deviceName, CancellationToken ct = default)
     {
         if (_hub is null) throw new InvalidOperationException("Not connected to signaling server.");

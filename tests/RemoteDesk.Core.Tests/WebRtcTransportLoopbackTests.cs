@@ -7,6 +7,7 @@ using Xunit;
 
 namespace RemoteDesk.Core.Tests;
 
+[Collection("WebRtcSerialTests")]
 public class WebRtcTransportLoopbackTests
 {
     [Fact]

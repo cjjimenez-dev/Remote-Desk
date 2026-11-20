@@ -11,6 +11,7 @@ using Xunit;
 
 namespace RemoteDesk.Core.Tests;
 
+[Collection("WebRtcSerialTests")]
 public class SignalingAndWebRtcE2ETests
 {
     [Fact]

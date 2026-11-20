@@ -1,0 +1,16 @@
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: remotedesk-coturn
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - /etc/letsencrypt/live/turn.yourdomain.com:/etc/coturn/certs:ro
+      - coturn_logs:/var/log/coturn
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+
+volumes:
+  coturn_logs:

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
+using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
+using RemoteDesk.Core.Security;
 
 namespace RemoteDesk.Server.Signaling;
 
@@ -29,6 +31,29 @@ public sealed class SignalingHub : Hub
             hostId, deviceName, connectionId);
 
         return Task.FromResult(true);
+    }
+
+    public Task<List<IceServerConfig>> GetIceServers(string deviceId)
+    {
+        var turnHost = Environment.GetEnvironmentVariable("TURN_HOST") ?? "turn.remotedesk.net";
+        var turnSecret = Environment.GetEnvironmentVariable("TURN_SECRET") ?? "RemoteDesk_Turn_Secret_Key_Change_In_Production_2026!";
+        var udpPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_UDP_PORT"), out var u) ? u : 3478;
+        var tlsPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_TLS_PORT"), out var t) ? t : 5349;
+        var fallbackPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_FALLBACK_PORT"), out var f) ? f : 443;
+
+        var id = string.IsNullOrWhiteSpace(deviceId) ? Context.ConnectionId : deviceId;
+        var servers = TurnCredentialGenerator.CreateIceServers(
+            turnHost,
+            turnSecret,
+            id,
+            ttl: TimeSpan.FromHours(24),
+            udpPort: udpPort,
+            tcpPort: udpPort,
+            tlsPort: tlsPort,
+            fallbackTlsPort: fallbackPort);
+
+        Logger.Debug("Generated {Count} ICE servers for device [{DeviceId}]", servers.Count, id);
+        return Task.FromResult(servers);
     }
 
     public async Task RequestConnection(string targetHostId, string viewerName)

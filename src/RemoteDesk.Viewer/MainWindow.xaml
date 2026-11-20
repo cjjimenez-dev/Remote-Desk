@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 3 LAN WebRTC Peer-to-Peer"
+        Title="RemoteDesk Viewer - Phase 4 Internet Connectivity &amp; TURN"
         Height="800" Width="1280"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
@@ -29,7 +29,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,14,0" VerticalAlignment="Center"/>
                     <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0" VerticalAlignment="Center">
-                        <TextBlock Text="Phase 3: WebRTC P2P" FontSize="11" Foreground="#9CA3AF"/>
+                        <TextBlock Text="Phase 4: Internet &amp; NAT" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
 
                     <!-- Remote Host ID Input -->
@@ -41,7 +41,7 @@
 
                     <!-- Connect / Disconnect Button -->
                     <Button Command="{Binding ConnectRemoteCommand}" 
-                            Height="28" Padding="12,2" FontWeight="Bold" Cursor="Hand" BorderThickness="0" Margin="0,0,16,0">
+                            Height="28" Padding="12,2" FontWeight="Bold" Cursor="Hand" BorderThickness="0" Margin="0,0,10,0">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Background" Value="#16A34A"/>
@@ -61,7 +61,12 @@
                         </Button.Style>
                     </Button>
 
-                    <Separator Style="{StaticResource {x:Static ToolBar.SeparatorStyleKey}}" Background="#3F3F46" Margin="0,0,16,0"/>
+                    <!-- Force TURN Relay Mode Checkbox -->
+                    <CheckBox IsChecked="{Binding ForceRelay}" Content="Force Relay" 
+                              Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,14,0"
+                              ToolTip="Forces WebRTC traffic through TURN relay (simulates symmetric NAT or restrictive corporate firewall)"/>
+
+                    <Separator Style="{StaticResource {x:Static ToolBar.SeparatorStyleKey}}" Background="#3F3F46" Margin="0,0,14,0"/>
 
                     <!-- Local Loopback Diagnostics Section -->
                     <TextBlock Text="Display:" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -138,6 +143,11 @@
                     
                     <!-- Badges Row -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <!-- Connection Path Badge (Direct LAN, STUN Hole-punch, or TURN Relayed) -->
+                        <Border Background="{Binding ConnectionPathColor}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding ConnectionPathBadge}" FontWeight="Bold" Foreground="White" FontSize="11"/>
+                        </Border>
+
                         <!-- FPS Badge -->
                         <Border Background="#064E3B" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                             <TextBlock Text="{Binding FpsText}" FontWeight="Bold" Foreground="#34D399" FontSize="12"/>

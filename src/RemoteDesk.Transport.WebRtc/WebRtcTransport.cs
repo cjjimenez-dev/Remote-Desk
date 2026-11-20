@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
@@ -13,9 +14,15 @@ public sealed class WebRtcTransport : ITransport
 
     private readonly RTCPeerConnection _peerConnection;
     private readonly bool _isInitiator;
+    private readonly bool _forceRelay;
     private TransportState _state = TransportState.New;
+    private ConnectionPath _connectionPath = ConnectionPath.Unknown;
     private readonly ConcurrentDictionary<string, RTCDataChannel> _dataChannels = new();
     private readonly ConcurrentDictionary<byte, string> _channelLabelByCode = new();
+
+    private readonly List<RTCIceCandidateType> _localCandidateTypes = [];
+    private readonly List<RTCIceCandidateType> _remoteCandidateTypes = [];
+    private readonly List<string> _remoteCandidateAddresses = [];
 
     // Video reassembly state
     private readonly ConcurrentDictionary<uint, VideoFrameAssembler> _pendingFrames = new();
@@ -33,28 +40,93 @@ public sealed class WebRtcTransport : ITransport
                 _state = value;
                 Logger.Information("WebRtcTransport state changed to {State}", value);
                 StateChanged?.Invoke(value);
+
+                if (value == TransportState.Connected)
+                {
+                    EvaluateConnectionPath();
+                }
+            }
+        }
+    }
+
+    public ConnectionPath ConnectionPath
+    {
+        get => _connectionPath;
+        private set
+        {
+            if (_connectionPath != value)
+            {
+                _connectionPath = value;
+                Logger.Information("WebRtcTransport connection path detected: {Path}", value);
+                ConnectionPathChanged?.Invoke(value);
             }
         }
     }
 
     public event Action<TransportState>? StateChanged;
+    public event Action<ConnectionPath>? ConnectionPathChanged;
     public event Action<byte, ReadOnlyMemory<byte>>? MessageReceived;
     public event Action<ReadOnlyMemory<byte>>? VideoPacketReceived;
     public event Action<string>? ErrorOccurred;
 
     public event Action<string, string, int>? IceCandidateGenerated;
 
-    public WebRtcTransport(bool isInitiator, RTCConfiguration? config = null)
+    public WebRtcTransport(bool isInitiator, RTCConfiguration? config)
+        : this(isInitiator, null, false, config)
+    {
+    }
+
+    public WebRtcTransport(
+        bool isInitiator,
+        IEnumerable<IceServerConfig>? iceServers = null,
+        bool forceRelay = false,
+        RTCConfiguration? config = null)
     {
         _isInitiator = isInitiator;
+        _forceRelay = forceRelay;
 
-        config ??= new RTCConfiguration
+        if (forceRelay)
         {
-            iceServers = new List<RTCIceServer>
+            _connectionPath = ConnectionPath.TurnRelayed;
+        }
+
+        if (config == null)
+        {
+            config = new RTCConfiguration
             {
-                new() { urls = "stun:stun.l.google.com:19302" }
+                iceServers = new List<RTCIceServer>()
+            };
+
+            if (iceServers != null)
+            {
+                foreach (var server in iceServers)
+                {
+                    foreach (var url in server.Urls)
+                    {
+                        var rtcServer = new RTCIceServer { urls = url };
+                        if (!string.IsNullOrEmpty(server.Credential))
+                        {
+                            rtcServer.username = server.Username;
+                            rtcServer.credential = server.Credential;
+                            rtcServer.credentialType = RTCIceCredentialType.password;
+                        }
+                        config.iceServers.Add(rtcServer);
+                    }
+                }
             }
-        };
+
+            // Fallback default STUN if no servers provided
+            if (config.iceServers.Count == 0)
+            {
+                config.iceServers.Add(new RTCIceServer { urls = "stun:stun.l.google.com:19302" });
+            }
+        }
+
+        if (forceRelay)
+        {
+            config.iceTransportPolicy = RTCIceTransportPolicy.relay;
+            Logger.Information("WebRtcTransport forced relay policy enabled.");
+        }
 
         _peerConnection = new RTCPeerConnection(config);
 
@@ -87,8 +159,13 @@ public sealed class WebRtcTransport : ITransport
         {
             if (candidate != null && !string.IsNullOrEmpty(candidate.candidate))
             {
-                Logger.Debug("Generated ICE candidate: {Candidate} (mid={Mid}, line={Line})",
-                    candidate.candidate, candidate.sdpMid, candidate.sdpMLineIndex);
+                lock (_localCandidateTypes)
+                {
+                    _localCandidateTypes.Add(candidate.type);
+                }
+
+                Logger.Debug("Generated ICE candidate: {Candidate} (type={Type}, mid={Mid}, line={Line})",
+                    candidate.candidate, candidate.type, candidate.sdpMid, candidate.sdpMLineIndex);
                 IceCandidateGenerated?.Invoke(candidate.candidate, candidate.sdpMid, candidate.sdpMLineIndex);
             }
         };
@@ -98,6 +175,61 @@ public sealed class WebRtcTransport : ITransport
             Logger.Information("Remote data channel opened: {Label}", channel.label);
             RegisterDataChannel(channel);
         };
+    }
+
+    private void EvaluateConnectionPath()
+    {
+        if (_forceRelay)
+        {
+            ConnectionPath = ConnectionPath.TurnRelayed;
+            return;
+        }
+
+        lock (_remoteCandidateTypes)
+        {
+            // If any relay candidates were generated or used and no host candidates matched
+            if (_localCandidateTypes.Contains(RTCIceCandidateType.relay) || _remoteCandidateTypes.Contains(RTCIceCandidateType.relay))
+            {
+                if (!_localCandidateTypes.Contains(RTCIceCandidateType.host) && !_localCandidateTypes.Contains(RTCIceCandidateType.srflx))
+                {
+                    ConnectionPath = ConnectionPath.TurnRelayed;
+                    return;
+                }
+            }
+
+            // Check if remote candidates are public STUN reflexive
+            var hasPublicSrflx = _remoteCandidateTypes.Contains(RTCIceCandidateType.srflx) ||
+                                 _remoteCandidateTypes.Contains(RTCIceCandidateType.prflx);
+
+            var allPrivate = _remoteCandidateAddresses.Count > 0 &&
+                             _remoteCandidateAddresses.All(IsPrivateOrLoopbackAddress);
+
+            if (hasPublicSrflx && !allPrivate)
+            {
+                ConnectionPath = ConnectionPath.DirectStunHolePunch;
+            }
+            else
+            {
+                ConnectionPath = ConnectionPath.DirectLocal;
+            }
+        }
+    }
+
+    private static bool IsPrivateOrLoopbackAddress(string address)
+    {
+        if (IPAddress.TryParse(address, out var ip))
+        {
+            if (IPAddress.IsLoopback(ip)) return true;
+            var bytes = ip.GetAddressBytes();
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                if (bytes[0] == 10) return true;
+                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+                if (bytes[0] == 192 && bytes[1] == 168) return true;
+                if (bytes[0] == 169 && bytes[1] == 254) return true;
+            }
+        }
+        return false;
     }
 
     public async Task InitializeChannelsAsync()
@@ -233,12 +365,48 @@ public sealed class WebRtcTransport : ITransport
 
     public void AddIceCandidate(string candidate, string sdpMid, int sdpMLineIndex)
     {
+        // Parse candidate type and address for path detection
+        ParseCandidateInfo(candidate, out var candidateType, out var address);
+        lock (_remoteCandidateTypes)
+        {
+            if (candidateType.HasValue) _remoteCandidateTypes.Add(candidateType.Value);
+            if (!string.IsNullOrEmpty(address)) _remoteCandidateAddresses.Add(address);
+        }
+
         _peerConnection.addIceCandidate(new RTCIceCandidateInit
         {
             candidate = candidate,
             sdpMid = sdpMid,
             sdpMLineIndex = (ushort)sdpMLineIndex
         });
+    }
+
+    private static void ParseCandidateInfo(string candidateStr, out RTCIceCandidateType? type, out string? address)
+    {
+        type = null;
+        address = null;
+
+        var parts = candidateStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].Equals("typ", StringComparison.OrdinalIgnoreCase) && i + 1 < parts.Length)
+            {
+                type = parts[i + 1].ToLowerInvariant() switch
+                {
+                    "host" => RTCIceCandidateType.host,
+                    "srflx" => RTCIceCandidateType.srflx,
+                    "prflx" => RTCIceCandidateType.prflx,
+                    "relay" => RTCIceCandidateType.relay,
+                    _ => null
+                };
+            }
+        }
+
+        // Standard SDP candidate address is at index 4 (candidate:foundation component transport priority address port ...)
+        if (parts.Length > 5)
+        {
+            address = parts[4];
+        }
     }
 
     public ValueTask SendMessageAsync(byte channelId, ReadOnlyMemory<byte> payload, bool reliable = true, CancellationToken ct = default)

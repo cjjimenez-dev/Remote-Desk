@@ -14,8 +14,9 @@ Log.Logger = new LoggerConfiguration()
 var serverUrl = "http://localhost:5000/signaling";
 var hostId = $"{Random.Shared.Next(100, 999)}-{Random.Shared.Next(100, 999)}";
 var deviceName = Environment.MachineName;
+var forceRelay = false;
 
-// Parse optional arguments: --server <url>, --id <hostId>, --name <name>
+// Parse optional arguments: --server <url>, --id <hostId>, --name <name>, --force-relay
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] == "--server" && i + 1 < args.Length)
@@ -30,14 +31,19 @@ for (var i = 0; i < args.Length; i++)
     {
         deviceName = args[++i];
     }
+    else if (args[i] == "--force-relay")
+    {
+        forceRelay = true;
+    }
 }
 
 Log.Information("==================================================");
-Log.Information("   RemoteDesk Host Agent - Phase 3 LAN P2P");
+Log.Information("   RemoteDesk Host Agent - Phase 4 Internet & NAT");
 Log.Information("==================================================");
 Log.Information("  Host ID:     {HostId}", hostId);
 Log.Information("  Device Name: {DeviceName}", deviceName);
 Log.Information("  Signaling:   {ServerUrl}", serverUrl);
+Log.Information("  Force Relay: {ForceRelay}", forceRelay);
 Log.Information("  Kill Hotkey: Ctrl + Alt + Shift + Esc");
 Log.Information("==================================================");
 
@@ -113,8 +119,25 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
         // 1. Accept connection
         await signaling.AcceptConnectionAsync(viewerConnId, sessionId);
 
-        // 2. Create WebRtcTransport
-        currentTransport = new WebRtcTransport(isInitiator: false);
+        // 2. Fetch ICE servers (STUN + TURN with short-lived credentials)
+        List<IceServerConfig>? iceServers = null;
+        try
+        {
+            iceServers = await signaling.GetIceServersAsync(hostId);
+            Log.Information("Obtained {Count} STUN/TURN servers from broker.", iceServers.Count);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("Could not retrieve STUN/TURN servers ({Message}). Falling back to local/default.", ex.Message);
+        }
+
+        // 3. Create WebRtcTransport
+        currentTransport = new WebRtcTransport(isInitiator: false, iceServers: iceServers, forceRelay: forceRelay);
+
+        currentTransport.ConnectionPathChanged += path =>
+        {
+            Log.Information(">>> Connection path active: {Path}", path);
+        };
 
         // Wire ICE Candidate generation from Host -> Viewer
         currentTransport.IceCandidateGenerated += (candidate, mid, line) =>

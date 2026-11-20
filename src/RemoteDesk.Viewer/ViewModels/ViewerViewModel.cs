@@ -73,6 +73,18 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private string _viewerName = Environment.MachineName;
 
     [ObservableProperty]
+    private bool _forceRelay;
+
+    [ObservableProperty]
+    private ConnectionPath _connectionPath = ConnectionPath.Unknown;
+
+    [ObservableProperty]
+    private string _connectionPathBadge = "🟢 Direct P2P";
+
+    [ObservableProperty]
+    private string _connectionPathColor = "#10B981";
+
+    [ObservableProperty]
     private string _fpsText = "0.0 FPS";
 
     [ObservableProperty]
@@ -201,8 +213,48 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
                 try
                 {
-                    // Create Initiator WebRTC transport
-                    _transport = new WebRtcTransport(isInitiator: true);
+                    // Fetch dynamic STUN/TURN servers from broker
+                    List<IceServerConfig>? iceServers = null;
+                    try
+                    {
+                        iceServers = await _signalingClient.GetIceServersAsync(TargetHostId);
+                        Logger.Information("Retrieved {Count} ICE servers from signaling broker.", iceServers.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning("Could not retrieve ICE servers ({Message}). Using defaults.", ex.Message);
+                    }
+
+                    // Create Initiator WebRTC transport with STUN/TURN & optional forced relay
+                    _transport = new WebRtcTransport(isInitiator: true, iceServers: iceServers, forceRelay: ForceRelay);
+
+                    _transport.ConnectionPathChanged += path =>
+                    {
+                        _dispatcher.Invoke(() =>
+                        {
+                            ConnectionPath = path;
+                            switch (path)
+                            {
+                                case ConnectionPath.DirectLocal:
+                                    ConnectionPathBadge = "🟢 Direct LAN";
+                                    ConnectionPathColor = "#10B981";
+                                    break;
+                                case ConnectionPath.DirectStunHolePunch:
+                                    ConnectionPathBadge = "🟢 Direct P2P (STUN)";
+                                    ConnectionPathColor = "#059669";
+                                    break;
+                                case ConnectionPath.TurnRelayed:
+                                    ConnectionPathBadge = "🟠 TURN Relayed";
+                                    ConnectionPathColor = "#F59E0B";
+                                    break;
+                                default:
+                                    ConnectionPathBadge = "⚪ P2P";
+                                    ConnectionPathColor = "#6B7280";
+                                    break;
+                            }
+                            StatusText = $"Connected to [{TargetHostId}] via WebRTC ({ConnectionPathBadge})";
+                        });
+                    };
 
                     _transport.IceCandidateGenerated += (candidate, mid, line) =>
                     {

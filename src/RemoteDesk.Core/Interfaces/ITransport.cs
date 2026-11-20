@@ -5,8 +5,10 @@ namespace RemoteDesk.Core.Interfaces;
 public interface ITransport : IAsyncDisposable
 {
     TransportState State { get; }
+    ConnectionPath ConnectionPath { get; }
 
     event Action<TransportState>? StateChanged;
+    event Action<ConnectionPath>? ConnectionPathChanged;
     event Action<byte, ReadOnlyMemory<byte>>? MessageReceived;
     event Action<ReadOnlyMemory<byte>>? VideoPacketReceived;
     event Action<string>? ErrorOccurred;
