@@ -1,0 +1,33 @@
+## .gitignore for .NET / C# and Visual Studio
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+*.dotCover
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Build artifacts
+publish/
+dist/
+artifacts/
+
+# Secrets / local config
+*.local.json
+appsettings.Development.json
+*.pfx
+*.cer

@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RemoteDesk.Core/RemoteDesk.Core.csproj" />
+    <Project Path="src/RemoteDesk.Host/RemoteDesk.Host.csproj" />
+    <Project Path="src/RemoteDesk.Platform.Windows/RemoteDesk.Platform.Windows.csproj" />
+    <Project Path="src/RemoteDesk.Server.Signaling/RemoteDesk.Server.Signaling.csproj" />
+    <Project Path="src/RemoteDesk.Transport.WebRtc/RemoteDesk.Transport.WebRtc.csproj" />
+    <Project Path="src/RemoteDesk.Viewer/RemoteDesk.Viewer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RemoteDesk.Core.Tests/RemoteDesk.Core.Tests.csproj" />
+    <Project Path="tests/RemoteDesk.TestHost/RemoteDesk.TestHost.csproj" />
+  </Folder>
+</Solution>

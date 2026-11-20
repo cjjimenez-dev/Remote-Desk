@@ -1,0 +1,30 @@
+name: CI Build & Tests
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    name: Build & Test on Windows
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore Dependencies
+      run: dotnet restore RemoteDesk.slnx
+
+    - name: Build Solution
+      run: dotnet build RemoteDesk.slnx --configuration Release --no-restore
+
+    - name: Run Unit Tests
+      run: dotnet test RemoteDesk.slnx --configuration Release --no-build --verbosity normal

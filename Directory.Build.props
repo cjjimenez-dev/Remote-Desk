@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Company>RemoteDesk</Company>
+    <Product>RemoteDesk</Product>
+    <Authors>RemoteDesk Team</Authors>
+    <Copyright>Copyright © 2026 RemoteDesk</Copyright>
+    <Version>0.1.0-alpha</Version>
+  </PropertyGroup>
+</Project>
