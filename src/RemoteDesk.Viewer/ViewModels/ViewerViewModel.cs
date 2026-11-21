@@ -295,6 +295,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _updateStatusMessage = string.Empty;
 
+    [ObservableProperty]
+    private string _copiedTooltipText = "Copy to Clipboard";
+
     // --- Integrated Servers (Signaling & Fleet Manager) ---
     private readonly IntegratedServerManager _serverManager = new();
 
@@ -1324,6 +1327,33 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         IsAddressBookOpen = false;
     }
 
+    [RelayCommand]
+    private async Task ConnectToAddressBookEntryAsync(AddressBookEntry? entry)
+    {
+        if (entry == null || string.IsNullOrWhiteSpace(entry.DeviceId)) return;
+        TargetHostId = entry.DeviceId;
+        await ConnectRemoteAsync();
+    }
+
+    [RelayCommand]
+    private void CopyDeviceId()
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(LocalDeviceId);
+            CopiedTooltipText = "Copied to Clipboard!";
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2000);
+                _dispatcher.Invoke(() => CopiedTooltipText = "Copy to Clipboard");
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to copy Device ID to clipboard.");
+        }
+    }
+
     // --- Terminal Commands ---
     [RelayCommand]
     private void ToggleTerminalPane()
@@ -1589,8 +1619,8 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 }
             });
 
-            // Perform initial background update check now that the Fleet API server is ready
-            await CheckForUpdatesAsync().ConfigureAwait(false);
+            // Auto-update popup disabled on startup to keep UI clean; manual check available via settings
+            // await CheckForUpdatesAsync().ConfigureAwait(false);
 
             // Initialize Background Host Engine to allow other computers to connect to This Desk
             _hostServer = new HostSessionServer(LocalDeviceId, ViewerName, SignalingServerUrl, ForceRelay)

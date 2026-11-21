@@ -126,6 +126,45 @@
             </Setter>
         </Style>
 
+        <!-- AnyDesk Signature Red Button Style -->
+        <Style x:Key="AnyDeskRedButton" TargetType="Button">
+            <Setter Property="Background" Value="#EF4444"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Padding" Value="18,0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#F87171"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" 
+                                Background="{TemplateBinding Background}" 
+                                BorderBrush="{TemplateBinding BorderBrush}" 
+                                BorderThickness="{TemplateBinding BorderThickness}" 
+                                CornerRadius="6" 
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#DC2626"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#FCA5A5"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#B91C1C"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="EmilCard" TargetType="Border">
             <Setter Property="Background" Value="#121216"/>
             <Setter Property="BorderBrush" Value="#22222A"/>
@@ -146,128 +185,89 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Top Header & Connection Bar -->
-        <Border Grid.Row="0" Background="#0C0C0F" Padding="14,8" BorderBrush="#1F1F26" BorderThickness="0,0,0,1">
+        <!-- Top Tab Header Bar (AnyDesk Style) -->
+        <Border Grid.Row="0" Background="#16161B" Padding="14,6" BorderBrush="#252530" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
-                <!-- Left: Branding & Remote Host Connection Controls -->
+                <!-- Left: App Icon & AnyDesk Tabs -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                    <!-- Custom Emil-style Vector Logo Icon -->
-                    <Border CornerRadius="7" Background="#181820" BorderBrush="#2A2A38" BorderThickness="1" Padding="2" Margin="0,0,10,0">
-                        <Image Source="assets/logo-64.png" Width="24" Height="24" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <!-- Brand Icon -->
+                    <Border CornerRadius="6" Background="#1D1D24" BorderBrush="#31313F" BorderThickness="1" Padding="2" Margin="0,0,8,0">
+                        <Image Source="assets/logo-64.png" Width="20" Height="20" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
+                    <TextBlock Text="RemoteDesk" FontSize="14" FontWeight="Bold" Foreground="#F4F4F5" Margin="0,0,12,0" VerticalAlignment="Center"/>
 
-                    <TextBlock Text="RemoteDesk" FontSize="16" FontWeight="Bold" Foreground="#F4F4F5" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                    <Border Background="#141418" BorderBrush="#262630" BorderThickness="1" CornerRadius="10" Padding="6,1" Margin="0,0,14,0" VerticalAlignment="Center">
-                        <TextBlock Text="PRO v1.0" FontSize="10" FontWeight="SemiBold" Foreground="#A1A1AA"/>
-                    </Border>
-
-                    <!-- My Local Device ID Capsule -->
-                    <Border Background="#141418" BorderBrush="#22222C" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                    <!-- AnyDesk Active Tab -->
+                    <Border Background="#202026" BorderBrush="#323240" BorderThickness="1" CornerRadius="6" Padding="10,4" Margin="0,0,6,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="MY ID:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding LocalDeviceId}" FontFamily="Consolas, Cascadia Code" FontWeight="Bold" Foreground="#A78BFA" FontSize="12" VerticalAlignment="Center"/>
+                            <Ellipse Width="6" Height="6" Fill="#EF4444" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="New Connection" FontWeight="SemiBold" FontSize="11" Foreground="#F4F4F5" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
 
-                    <!-- Server Host Input (For Connecting to Remote PC or Controller) -->
-                    <Border Background="#141418" BorderBrush="#262632" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Signaling Server Host (localhost or IP of the controller computer)">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="SERVER:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="4,0,4,0" VerticalAlignment="Center"/>
-                            <TextBox Text="{Binding SignalingHostInput, UpdateSourceTrigger=PropertyChanged}" 
-                                     Width="85" Height="24" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
-                                     FontFamily="Consolas, Cascadia Code" FontSize="11"
-                                     Background="#09090B" Foreground="#38BDF8" BorderBrush="#2A2A36" BorderThickness="1" Padding="2,0">
-                                <TextBox.InputBindings>
-                                    <KeyBinding Key="Return" Command="{Binding ApplySignalingServerChangeCommand}"/>
-                                </TextBox.InputBindings>
-                            </TextBox>
-                            <Button Command="{Binding ApplySignalingServerChangeCommand}" Content="✓" Style="{StaticResource EmilHeaderButton}" Height="24" Padding="6,0" Margin="4,0,0,0" ToolTip="Apply server IP change"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Remote Host ID Input -->
-                    <Border Background="#141418" BorderBrush="#262632" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="HOST ID:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="4,0,6,0" VerticalAlignment="Center"/>
-                            <TextBox Text="{Binding TargetHostId, UpdateSourceTrigger=PropertyChanged}" 
-                                     Width="105" Height="24" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
-                                     FontFamily="Consolas, Cascadia Code" FontSize="13" FontWeight="Bold"
-                                     Background="#09090B" Foreground="#38BDF8" BorderBrush="#2A2A36" BorderThickness="1" Padding="2,0"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Connect / Disconnect Button -->
-                    <Button Command="{Binding ConnectRemoteCommand}" Margin="0,0,8,0">
-                        <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource EmilConnectButton}">
-                                <Setter Property="Content" Value="⚡ Connect"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsConnecting}" Value="True">
-                                        <Setter Property="Background" Value="#D97706"/>
-                                        <Setter Property="BorderBrush" Value="#FBBF24"/>
-                                        <Setter Property="Content" Value="Connecting..."/>
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsRemoteSessionActive}" Value="True">
-                                        <Setter Property="Background" Value="#DC2626"/>
-                                        <Setter Property="BorderBrush" Value="#F87171"/>
-                                        <Setter Property="Content" Value="❌ Disconnect"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                    </Button>
-
-                    <!-- In-Session Controls (Visible ONLY during active session) -->
+                    <!-- In-Session Controls (Only visible during active session) -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="{Binding IsSessionActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
-                        <Border Width="1" Height="20" Background="#262632" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <Border Width="1" Height="18" Background="#2C2C38" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                        <!-- Disconnect Button (AnyDesk Red) -->
+                        <Button Command="{Binding DisconnectRemoteCommand}" 
+                                Content="❌ Disconnect" Style="{StaticResource AnyDeskRedButton}" Height="26" Padding="10,0" Margin="0,0,8,0"/>
 
                         <TextBlock Text="Monitor:" Foreground="#71717A" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,0"/>
                         <ComboBox ItemsSource="{Binding RemoteDisplays}" 
                                   SelectedItem="{Binding SelectedRemoteDisplay}" 
                                   DisplayMemberPath="DeviceName"
-                                  Width="95" Height="26" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                                  Width="90" Height="24" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
 
                         <TextBlock Text="Quality:" Foreground="#71717A" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,0"/>
                         <ComboBox ItemsSource="{Binding AvailableQualityPresets}" 
                                   SelectedItem="{Binding SelectedQualityPreset}" 
-                                  Width="85" Height="26" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                                  Width="80" Height="24" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
 
-                        <!-- Audio Toggle Button -->
                         <Button Command="{Binding ToggleAudioMuteCommand}" 
                                 Style="{StaticResource EmilHeaderButton}"
-                                Content="{Binding AudioButtonText}" Margin="0,0,6,0"/>
+                                Content="{Binding AudioButtonText}" Height="24" Margin="0,0,6,0"/>
 
-                        <!-- File Transfer Button -->
                         <Button Command="{Binding SendFilePromptCommand}" 
                                 Style="{StaticResource EmilHeaderButton}"
-                                Content="📁 File" Margin="0,0,6,0"/>
+                                Content="📁 File" Height="24" Margin="0,0,6,0"/>
 
-                        <!-- In-Session Chat Button with Unread Badge -->
                         <Button Command="{Binding ToggleChatPaneCommand}" 
-                                Style="{StaticResource EmilHeaderButton}"
-                                Margin="0,0,6,0">
+                                Style="{StaticResource EmilHeaderButton}" Height="24" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="💬 Chat"/>
                                 <TextBlock Text="{Binding UnreadChatBadgeText}" FontWeight="Bold" Foreground="#FDE047"/>
                             </StackPanel>
                         </Button>
 
-                        <!-- Remote Terminal Button -->
                         <Button Command="{Binding ToggleTerminalPaneCommand}" 
                                 Style="{StaticResource EmilHeaderButton}"
-                                Content="💻 Terminal" Margin="0,0,6,0"/>
+                                Content="💻 Terminal" Height="24" Margin="0,0,6,0"/>
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Right: Quick Tools, Loopback & Cursor -->
+                <!-- Right: Utilities (Server Host, Address Book, Fleet, Loopback) -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <!-- Address Book Quick Button -->
+                    <!-- Server Host Input -->
+                    <Border Background="#16161B" BorderBrush="#2C2C38" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Signaling Server Host (localhost or IP of host)">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="SERVER:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="2,0,4,0" VerticalAlignment="Center"/>
+                            <TextBox Text="{Binding SignalingHostInput, UpdateSourceTrigger=PropertyChanged}" 
+                                     Width="85" Height="22" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                                     FontFamily="Consolas, Cascadia Code" FontSize="11"
+                                     Background="#09090B" Foreground="#38BDF8" BorderBrush="#2A2A36" BorderThickness="1" Padding="2,0">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding ApplySignalingServerChangeCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <Button Command="{Binding ApplySignalingServerChangeCommand}" Content="✓" Style="{StaticResource EmilHeaderButton}" Height="22" Padding="6,0" Margin="4,0,0,0" ToolTip="Apply server IP change"/>
+                        </StackPanel>
+                    </Border>
+
                     <Button Command="{Binding ToggleAddressBookCommand}" 
                             Style="{StaticResource EmilHeaderButton}"
                             Content="📖 Saved" Margin="0,0,6,0" ToolTip="Address Book / Saved Desktops"/>
 
-                    <!-- Fleet Dashboard Button -->
                     <Button Command="{Binding ToggleFleetDashboardCommand}" 
                             Style="{StaticResource EmilAccentButton}"
                             Content="🏢 Fleet" Margin="0,0,8,0" ToolTip="Fleet Management Dashboard"/>
@@ -288,7 +288,7 @@
                         </Button.Style>
                     </Button>
 
-                    <Border Background="#121216" BorderBrush="#22222A" BorderThickness="1" CornerRadius="6" Padding="6,3" VerticalAlignment="Center"
+                    <Border Background="#121216" BorderBrush="#22222A" BorderThickness="1" CornerRadius="6" Padding="6,2" VerticalAlignment="Center"
                             Visibility="{Binding IsSessionActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
                         <TextBlock Text="{Binding CursorPositionText}" FontSize="11" FontFamily="Consolas, Cascadia Code" Foreground="#38BDF8"/>
                     </Border>
@@ -394,107 +394,168 @@
                        MouseMove="OnVideoMouseMove"
                        MouseWheel="OnVideoMouseWheel"/>
 
-                <!-- Emil-Style Dashboard Inactive State -->
+                <!-- AnyDesk Official Design Dashboard (When no session is active) -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Visibility="{Binding IsSessionActive, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}"
-                              Padding="20,16">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="760">
-                        <!-- Brand Header -->
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,18">
-                            <Border Width="38" Height="38" CornerRadius="10" Background="#141419" BorderBrush="#272734" BorderThickness="1" Margin="0,0,12,0" VerticalAlignment="Center">
-                                <Image Source="assets/logo-64.png" Width="24" Height="24" RenderOptions.BitmapScalingMode="HighQuality"/>
-                            </Border>
-                            <StackPanel VerticalAlignment="Center">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#F4F4F5" Margin="0,0,8,0"/>
-                                    <Border Background="#141418" BorderBrush="#262630" BorderThickness="1" CornerRadius="8" Padding="6,1" VerticalAlignment="Center">
-                                        <TextBlock Text="v1.0" FontSize="10" FontWeight="SemiBold" Foreground="#A1A1AA"/>
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Text="Sub-15ms WebRTC screen sharing &amp; remote desktop" FontSize="11" Foreground="#71717A" Margin="0,2,0,0"/>
-                            </StackPanel>
-                        </StackPanel>
-
-                        <!-- Dual Cards Grid: This Desk vs Remote Desk -->
-                        <Grid Margin="0,0,0,14">
+                              Padding="24,18">
+                    <StackPanel HorizontalAlignment="Center" MaxWidth="880">
+                        
+                        <!-- Top Two Hero Cards: This Desk & Remote Desk -->
+                        <Grid Margin="0,0,0,20">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1*"/>
-                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="16"/>
                                 <ColumnDefinition Width="1*"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Left Card: This Desk (Host) -->
-                            <Border Grid.Column="0" Background="#111116" BorderBrush="#22222C" BorderThickness="1" CornerRadius="12" Padding="18">
+                            <!-- Left Card: This Desk (AnyDesk Signature) -->
+                            <Border Grid.Column="0" Background="#202026" BorderBrush="#2F2F3B" BorderThickness="1" CornerRadius="10" Padding="20">
                                 <Border.Effect>
-                                    <DropShadowEffect BlurRadius="16" ShadowDepth="2" Color="#000000" Opacity="0.4"/>
+                                    <DropShadowEffect BlurRadius="18" ShadowDepth="2" Color="#000000" Opacity="0.35"/>
                                 </Border.Effect>
                                 <StackPanel>
-                                    <DockPanel LastChildFill="False" Margin="0,0,0,10">
-                                        <TextBlock Text="THIS DESK" FontWeight="Bold" FontSize="11" Foreground="#818CF8" DockPanel.Dock="Left"/>
-                                        <Border DockPanel.Dock="Right" Background="#064E3B" CornerRadius="4" Padding="6,2">
-                                            <TextBlock Text="● Ready" FontSize="10" FontWeight="Bold" Foreground="#34D399"/>
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,14">
+                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="6" Background="#181820" BorderBrush="#333344" BorderThickness="1" Margin="0,0,8,0">
+                                                <TextBlock Text="🖥" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="This Desk" FontWeight="Bold" FontSize="16" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Border DockPanel.Dock="Right" Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse Width="6" Height="6" Fill="#34D399" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Ready" FontSize="10" FontWeight="Bold" Foreground="#34D399"/>
+                                            </StackPanel>
                                         </Border>
                                     </DockPanel>
 
-                                    <TextBlock Text="Your Device ID (Share this to allow access):" FontSize="11" Foreground="#71717A" Margin="0,0,0,6"/>
-                                    <!-- Big Device ID -->
-                                    <Border Background="#09090B" BorderBrush="#272734" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,10">
-                                        <TextBlock Text="{Binding LocalDeviceId}" FontFamily="Consolas, Cascadia Code" FontSize="20" FontWeight="Bold" Foreground="#C084FC" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Your Address" FontSize="12" Foreground="#9CA3AF" Margin="0,0,0,6"/>
+                                    
+                                    <!-- Spaced Address Box with One-Click Copy -->
+                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                                        <DockPanel LastChildFill="True">
+                                            <Button DockPanel.Dock="Right" Command="{Binding CopyDeviceIdCommand}" 
+                                                    Style="{StaticResource EmilHeaderButton}" Height="30" Padding="10,0" ToolTip="{Binding CopiedTooltipText}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="📋 " FontSize="11"/>
+                                                    <TextBlock Text="Copy" FontSize="11" FontWeight="SemiBold"/>
+                                                </StackPanel>
+                                            </Button>
+                                            <TextBlock Text="{Binding LocalDeviceId}" FontFamily="Consolas, Cascadia Code, Segoe UI" 
+                                                       FontSize="22" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                        </DockPanel>
                                     </Border>
 
-                                    <!-- Auto-Accept Toggle -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <Ellipse Width="7" Height="7" Fill="#22C55E" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="AnyDesk is ready for incoming connections." FontSize="11" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                                    </StackPanel>
+
                                     <CheckBox IsChecked="{Binding AutoAcceptIncoming}" Content="Auto-accept incoming connections" 
-                                              Foreground="#A1A1AA" FontSize="11" Margin="0,0,0,8"/>
-                                    <TextBlock Text="Incoming requests prompt with Accept / Reject dialog." 
-                                               FontSize="10" Foreground="#52525B" TextWrapping="Wrap"/>
+                                              Foreground="#D1D5DB" FontSize="11" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Share this 9-digit address with anyone you want to allow to control this computer." 
+                                               FontSize="10" Foreground="#6B7280" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 
-                            <!-- Right Card: Remote Desk (Viewer) -->
-                            <Border Grid.Column="2" Background="#111116" BorderBrush="#22222C" BorderThickness="1" CornerRadius="12" Padding="18">
+                            <!-- Right Card: Remote Desk (AnyDesk Signature) -->
+                            <Border Grid.Column="2" Background="#202026" BorderBrush="#2F2F3B" BorderThickness="1" CornerRadius="10" Padding="20">
                                 <Border.Effect>
-                                    <DropShadowEffect BlurRadius="16" ShadowDepth="2" Color="#000000" Opacity="0.4"/>
+                                    <DropShadowEffect BlurRadius="18" ShadowDepth="2" Color="#000000" Opacity="0.35"/>
                                 </Border.Effect>
                                 <StackPanel>
-                                    <DockPanel LastChildFill="False" Margin="0,0,0,10">
-                                        <TextBlock Text="REMOTE DESK" FontWeight="Bold" FontSize="11" Foreground="#38BDF8" DockPanel.Dock="Left"/>
-                                        <TextBlock Text="Control Partner" FontSize="10" Foreground="#71717A" DockPanel.Dock="Right"/>
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,14">
+                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                            <Border Width="26" Height="26" CornerRadius="6" Background="#181820" BorderBrush="#333344" BorderThickness="1" Margin="0,0,8,0">
+                                                <TextBlock Text="🌐" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Text="Remote Desk" FontWeight="Bold" FontSize="16" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Control Partner" FontSize="11" Foreground="#6B7280" DockPanel.Dock="Right" VerticalAlignment="Center"/>
                                     </DockPanel>
 
-                                    <TextBlock Text="Enter Partner Device ID:" FontSize="11" Foreground="#71717A" Margin="0,0,0,6"/>
-                                    <!-- Partner ID Input -->
-                                    <Border Background="#09090B" BorderBrush="#272734" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,0,10">
-                                        <TextBox Text="{Binding TargetHostId, UpdateSourceTrigger=PropertyChanged}" 
-                                                 FontFamily="Consolas, Cascadia Code" FontSize="18" FontWeight="Bold"
-                                                 Background="Transparent" Foreground="#38BDF8" BorderThickness="0" 
-                                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Height="34">
-                                            <TextBox.InputBindings>
-                                                <KeyBinding Key="Return" Command="{Binding ConnectRemoteCommand}"/>
-                                            </TextBox.InputBindings>
-                                        </TextBox>
+                                    <TextBlock Text="Please enter the address of the remote device you'd like to see." FontSize="11" Foreground="#9CA3AF" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                                    
+                                    <!-- Partner Address Input & AnyDesk Red Connect Button -->
+                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="3" Margin="0,0,0,12">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Text="{Binding TargetHostId, UpdateSourceTrigger=PropertyChanged}" 
+                                                     FontFamily="Consolas, Cascadia Code, Segoe UI" FontSize="17" FontWeight="Bold"
+                                                     Background="Transparent" Foreground="#FFFFFF" BorderThickness="0" 
+                                                     VerticalContentAlignment="Center" Height="38" Padding="10,0">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Return" Command="{Binding ConnectRemoteCommand}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <Button Grid.Column="1" Command="{Binding ConnectRemoteCommand}" 
+                                                    Style="{StaticResource AnyDeskRedButton}" Height="38" Padding="18,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="➔ " FontWeight="Bold" FontSize="14"/>
+                                                    <TextBlock Text="Connect" FontWeight="Bold" FontSize="13"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
                                     </Border>
 
-                                    <!-- Connect Button -->
-                                    <Button Command="{Binding ConnectRemoteCommand}" Height="34" Margin="0,0,0,8"
-                                            Style="{StaticResource EmilConnectButton}" FontSize="12" Content="⚡ Connect"/>
-
-                                    <DockPanel LastChildFill="False">
-                                        <Button DockPanel.Dock="Left" Command="{Binding ToggleAddressBookCommand}" 
-                                                Style="{StaticResource EmilHeaderButton}" Content="📖 Saved PCs" Height="24" Padding="8,0" FontSize="11"/>
-                                        <CheckBox DockPanel.Dock="Right" IsChecked="{Binding ForceRelay}" Content="Force Relay" 
-                                                  Foreground="#71717A" VerticalAlignment="Center" FontSize="10"/>
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,4">
+                                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding ForceRelay}" Content="Force TURN Relay Mode" 
+                                                  Foreground="#D1D5DB" VerticalAlignment="Center" FontSize="11"/>
+                                        <Button DockPanel.Dock="Right" Command="{Binding ToggleAddressBookCommand}" 
+                                                Style="{StaticResource EmilHeaderButton}" Content="📖 Address Book" Height="24" Padding="8,0" FontSize="10"/>
                                     </DockPanel>
+                                    <TextBlock Text="Direct low-latency P2P WebRTC with encrypted TURN relay fallback." 
+                                               FontSize="10" Foreground="#6B7280" Margin="0,6,0,0"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <!-- Quick Tips Footer -->
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,0">
-                            <TextBlock Text="Signaling Server: " FontSize="10" Foreground="#52525B" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding SignalingServerUrl}" FontSize="10" FontFamily="Consolas" Foreground="#71717A" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                            <TextBlock Text="Emergency Kill: " FontSize="10" Foreground="#52525B" VerticalAlignment="Center"/>
-                            <TextBlock Text="Ctrl+Alt+Shift+Esc" FontSize="10" FontFamily="Consolas" Foreground="#EF4444" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <!-- Recent Sessions Section (AnyDesk Style) -->
+                        <Border Background="#1A1A20" BorderBrush="#2B2B36" BorderThickness="1" CornerRadius="10" Padding="18">
+                            <StackPanel>
+                                <DockPanel LastChildFill="False" Margin="0,0,0,12">
+                                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                        <TextBlock Text="🕒 Recent Sessions" FontWeight="Bold" FontSize="13" Foreground="#FFFFFF" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <Border Background="#23232C" CornerRadius="8" Padding="6,1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding AddressBookEntries.Count}" FontSize="10" FontWeight="Bold" Foreground="#9CA3AF"/>
+                                        </Border>
+                                    </StackPanel>
+                                </DockPanel>
+
+                                <!-- Recent Items Wrap List -->
+                                <ItemsControl ItemsSource="{Binding AddressBookEntries}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#202026" BorderBrush="#2F2F3B" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,10,10" Width="185">
+                                                <DockPanel LastChildFill="True">
+                                                    <Button DockPanel.Dock="Right" Command="{Binding DataContext.ConnectToAddressBookEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            CommandParameter="{Binding}" Content="➔" Style="{StaticResource AnyDeskRedButton}" Height="28" Width="30" Padding="0" ToolTip="Connect to this device"/>
+                                                    <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                                        <TextBlock Text="{Binding Alias}" FontWeight="Bold" FontSize="12" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding DeviceId}" FontFamily="Consolas" FontSize="11" Foreground="#38BDF8"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Empty State when no recent sessions exist -->
+                                <Border Background="#151519" BorderBrush="#252530" BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,2,0,0">
+                                    <TextBlock Text="Recent sessions will appear here automatically. Type a partner ID above and click Connect to start." 
+                                               FontSize="11" Foreground="#6B7280" HorizontalAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
                     </StackPanel>
                 </ScrollViewer>
 
