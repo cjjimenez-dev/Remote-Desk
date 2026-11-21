@@ -221,3 +221,70 @@ public sealed class QualitySettingsUpdateMessage
     [Key(3)]
     public bool EnableStaticFrameSkip { get; set; } = true;
 }
+
+// ==================== TERMINAL ====================
+
+public enum ShellType : byte
+{
+    PowerShell = 0,
+    Cmd = 1
+}
+
+[MessagePackObject]
+public sealed class TerminalStartMessage
+{
+    [Key(0)]
+    public string SessionId { get; set; } = Guid.NewGuid().ToString("N");
+
+    [Key(1)]
+    public ShellType Shell { get; set; } = ShellType.PowerShell;
+
+    [Key(2)]
+    public int Columns { get; set; } = 80;
+
+    [Key(3)]
+    public int Rows { get; set; } = 25;
+}
+
+[MessagePackObject]
+public sealed class TerminalInputMessage
+{
+    [Key(0)]
+    public string SessionId { get; set; } = string.Empty;
+
+    [Key(1)]
+    public string InputData { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class TerminalOutputMessage
+{
+    [Key(0)]
+    public string SessionId { get; set; } = string.Empty;
+
+    [Key(1)]
+    public string OutputData { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class TerminalResizeMessage
+{
+    [Key(0)]
+    public string SessionId { get; set; } = string.Empty;
+
+    [Key(1)]
+    public int Columns { get; set; } = 80;
+
+    [Key(2)]
+    public int Rows { get; set; } = 25;
+}
+
+[MessagePackObject]
+public sealed class TerminalCloseMessage
+{
+    [Key(0)]
+    public string SessionId { get; set; } = string.Empty;
+
+    [Key(1)]
+    public string Reason { get; set; } = string.Empty;
+}

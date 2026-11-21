@@ -118,6 +118,7 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.OriginalSource is System.Windows.Controls.TextBox) return;
         if (!_viewModel.IsSessionActive) return;
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
@@ -140,6 +141,7 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyUp(object sender, KeyEventArgs e)
     {
+        if (e.OriginalSource is System.Windows.Controls.TextBox) return;
         if (!_viewModel.IsSessionActive) return;
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
@@ -162,6 +164,7 @@ public partial class MainWindow : Window
 
     private void OnWindowTextInput(object sender, TextCompositionEventArgs e)
     {
+        if (e.OriginalSource is System.Windows.Controls.TextBox) return;
         if (!_viewModel.IsSessionActive) return;
 
         if (!string.IsNullOrEmpty(e.Text))

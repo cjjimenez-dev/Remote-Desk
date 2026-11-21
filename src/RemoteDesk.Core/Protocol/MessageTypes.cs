@@ -51,5 +51,12 @@ public enum MessageType : ushort
     AudioControl = 0x0401,
 
     // Chat (0x0500 - 0x05FF)
-    SessionChat = 0x0500
+    SessionChat = 0x0500,
+
+    // Terminal (0x0600 - 0x06FF)
+    TerminalStart = 0x0600,
+    TerminalOutput = 0x0601,
+    TerminalInput = 0x0602,
+    TerminalResize = 0x0603,
+    TerminalClose = 0x0604
 }

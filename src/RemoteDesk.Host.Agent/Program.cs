@@ -12,6 +12,7 @@ using RemoteDesk.Platform.Windows.Clipboard;
 using RemoteDesk.Platform.Windows.Ipc;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Platform.Windows.Session;
+using RemoteDesk.Platform.Windows.Terminal;
 using RemoteDesk.Transport.WebRtc;
 using Serilog;
 using SIPSorcery.Net;
@@ -84,6 +85,7 @@ FileTransferService? fileTransferService = null;
 WasapiAudioCapturer? audioCapturer = null;
 AdaptiveQualityController? qualityController = null;
 ChatService? chatService = null;
+ITerminalSession? activeTerminalSession = null;
 
 var sessionLock = new object();
 string? activeSessionId = null;
@@ -114,6 +116,12 @@ void StopActiveSession()
 
             chatService?.Dispose();
             chatService = null;
+
+            if (activeTerminalSession != null)
+            {
+                try { activeTerminalSession.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+                activeTerminalSession = null;
+            }
 
             capturer?.Stop();
             capturer?.Dispose();
@@ -391,7 +399,7 @@ else
             }
         };
 
-        currentTransport.MessageReceived += (channel, data) =>
+        currentTransport.MessageReceived += async (channel, data) =>
         {
             if (!ProtocolEnvelope.TryDecode(data.Span, out var env, out _)) return;
 
@@ -447,6 +455,70 @@ else
                 {
                     var settings = ProtocolSerializer.Deserialize<QualitySettingsUpdateMessage>(env.Payload);
                     qualityController.ApplyPreset(settings.Preset);
+                }
+            }
+            else if (channel == DataChannels.Terminal)
+            {
+                if (!activePermissions.HasFlag(SessionPermissions.Terminal))
+                {
+                    Log.Warning("Terminal message rejected: Session does not have Terminal permission.");
+                    return;
+                }
+
+                if (env.MessageType == MessageType.TerminalStart)
+                {
+                    var startMsg = ProtocolSerializer.Deserialize<TerminalStartMessage>(env.Payload);
+                    Log.Information("Starting remote terminal session [{SessionId}] (Shell: {Shell})", startMsg.SessionId, startMsg.Shell);
+
+                    if (activeTerminalSession != null)
+                    {
+                        await activeTerminalSession.DisposeAsync();
+                        activeTerminalSession = null;
+                    }
+
+                    var term = WindowsTerminalSession.Create(startMsg.SessionId, startMsg.Shell, startMsg.Columns, startMsg.Rows);
+                    activeTerminalSession = term;
+
+                    term.OutputReceived += text =>
+                    {
+                        if (currentTransport == null) return;
+                        var outMsg = new TerminalOutputMessage
+                        {
+                            SessionId = startMsg.SessionId,
+                            OutputData = text
+                        };
+                        var outEnv = new ProtocolEnvelope(DataChannels.Terminal, MessageType.TerminalOutput, ProtocolSerializer.Serialize(outMsg));
+                        _ = currentTransport.SendMessageAsync(DataChannels.Terminal, outEnv.ToBytes(), reliable: true);
+                    };
+
+                    term.Exited += code =>
+                    {
+                        Log.Information("Terminal session [{SessionId}] exited with code {Code}", startMsg.SessionId, code);
+                        if (currentTransport == null) return;
+                        var closeMsg = new TerminalCloseMessage
+                        {
+                            SessionId = startMsg.SessionId,
+                            Reason = $"Process exited with code {code}"
+                        };
+                        var closeEnv = new ProtocolEnvelope(DataChannels.Terminal, MessageType.TerminalClose, ProtocolSerializer.Serialize(closeMsg));
+                        _ = currentTransport.SendMessageAsync(DataChannels.Terminal, closeEnv.ToBytes(), reliable: true);
+                    };
+                }
+                else if (env.MessageType == MessageType.TerminalInput && activeTerminalSession != null)
+                {
+                    var inMsg = ProtocolSerializer.Deserialize<TerminalInputMessage>(env.Payload);
+                    await activeTerminalSession.WriteInputAsync(inMsg.InputData);
+                }
+                else if (env.MessageType == MessageType.TerminalResize && activeTerminalSession != null)
+                {
+                    var resMsg = ProtocolSerializer.Deserialize<TerminalResizeMessage>(env.Payload);
+                    activeTerminalSession.Resize(resMsg.Columns, resMsg.Rows);
+                }
+                else if (env.MessageType == MessageType.TerminalClose && activeTerminalSession != null)
+                {
+                    Log.Information("Closing terminal session [{SessionId}] on viewer request", activeTerminalSession.SessionId);
+                    await activeTerminalSession.DisposeAsync();
+                    activeTerminalSession = null;
                 }
             }
         };

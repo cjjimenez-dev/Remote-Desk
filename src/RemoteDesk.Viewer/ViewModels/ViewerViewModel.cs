@@ -10,6 +10,7 @@ using RemoteDesk.Core.Protocol;
 using RemoteDesk.Core.Security;
 using RemoteDesk.Core.Quality;
 using RemoteDesk.Core.Services;
+using RemoteDesk.Core.Terminal;
 using RemoteDesk.Platform.Windows;
 using RemoteDesk.Platform.Windows.Audio;
 using RemoteDesk.Platform.Windows.Clipboard;
@@ -224,6 +225,27 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isAddressBookOpen;
+
+    // --- Phase 8 Remote Terminal ---
+    private TerminalClientService? _terminalClientService;
+    private readonly TerminalBuffer _terminalBuffer = new();
+
+    [ObservableProperty]
+    private bool _isTerminalOpen;
+
+    [ObservableProperty]
+    private bool _isTerminalSessionActive;
+
+    [ObservableProperty]
+    private string _terminalOutputText = string.Empty;
+
+    [ObservableProperty]
+    private string _terminalInputText = string.Empty;
+
+    [ObservableProperty]
+    private ShellType _selectedShellType = ShellType.PowerShell;
+
+    public ObservableCollection<ShellType> AvailableShells { get; } = [ShellType.PowerShell, ShellType.Cmd];
 
     public ViewerViewModel(Dispatcher dispatcher)
     {
@@ -497,6 +519,29 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                                         }
                                     });
                                 };
+
+                                // 6. Remote Terminal
+                                if (_grantedPermissions.HasFlag(SessionPermissions.Terminal))
+                                {
+                                    _terminalClientService = new TerminalClientService(_transport);
+                                    _terminalClientService.OutputReceived += text =>
+                                    {
+                                        _dispatcher.Invoke(() =>
+                                        {
+                                            _terminalBuffer.Append(text);
+                                            TerminalOutputText = _terminalBuffer.GetFullText();
+                                        });
+                                    };
+                                    _terminalClientService.Closed += reason =>
+                                    {
+                                        _dispatcher.Invoke(() =>
+                                        {
+                                            IsTerminalSessionActive = false;
+                                            _terminalBuffer.Append($"\r\n[Terminal closed: {reason}]\r\n");
+                                            TerminalOutputText = _terminalBuffer.GetFullText();
+                                        });
+                                    };
+                                }
                             }
                             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
                             {
@@ -707,11 +752,15 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _chatService?.Dispose();
         _chatService = null;
 
+        _terminalClientService?.Dispose();
+        _terminalClientService = null;
+
         _dispatcher.Invoke(() =>
         {
             RemoteDisplays.Clear();
             SelectedRemoteDisplay = null;
             IsFileTransferActive = false;
+            IsTerminalSessionActive = false;
         });
     }
 
@@ -1174,6 +1223,73 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     {
         TargetHostId = entry.DeviceId;
         IsAddressBookOpen = false;
+    }
+
+    // --- Terminal Commands ---
+    [RelayCommand]
+    private void ToggleTerminalPane()
+    {
+        IsTerminalOpen = !IsTerminalOpen;
+    }
+
+    [RelayCommand]
+    private async Task StartTerminalSessionAsync()
+    {
+        if (_terminalClientService == null || !IsRemoteSessionActive) return;
+
+        try
+        {
+            _terminalBuffer.Clear();
+            _terminalBuffer.Append($"[Launching {SelectedShellType} via ConPTY...]\r\n");
+            TerminalOutputText = _terminalBuffer.GetFullText();
+            IsTerminalSessionActive = true;
+            await _terminalClientService.StartTerminalAsync(SelectedShellType, columns: 120, rows: 30);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to start terminal session.");
+            _terminalBuffer.Append($"[Failed to start terminal: {ex.Message}]\r\n");
+            TerminalOutputText = _terminalBuffer.GetFullText();
+            IsTerminalSessionActive = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SendTerminalInputAsync()
+    {
+        if (_terminalClientService == null || !IsTerminalSessionActive) return;
+        var text = TerminalInputText;
+        TerminalInputText = string.Empty;
+        try
+        {
+            await _terminalClientService.SendInputAsync(text + "\r\n");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to send terminal input.");
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseTerminalSessionAsync()
+    {
+        if (_terminalClientService == null || !IsTerminalSessionActive) return;
+        try
+        {
+            await _terminalClientService.CloseTerminalAsync("Closed by user");
+            IsTerminalSessionActive = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to close terminal session.");
+        }
+    }
+
+    [RelayCommand]
+    private void ClearTerminalOutput()
+    {
+        _terminalBuffer.Clear();
+        TerminalOutputText = string.Empty;
     }
 
     private void StopLoopback()

@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 7 Core Features"
+        Title="RemoteDesk Viewer - Phase 8 Remote Terminal"
         Height="850" Width="1350"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
@@ -30,7 +30,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,12,0" VerticalAlignment="Center">
-                        <TextBlock Text="Phase 7: Core Features" FontSize="11" Foreground="#9CA3AF"/>
+                        <TextBlock Text="Phase 8: Remote Terminal" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
 
                     <!-- My Local Device ID Display -->
@@ -113,6 +113,12 @@
                             <TextBlock Text="{Binding UnreadChatBadgeText}" FontWeight="Bold" Foreground="#FDE047"/>
                         </StackPanel>
                     </Button>
+
+                    <!-- Remote Terminal Button -->
+                    <Button Command="{Binding ToggleTerminalPaneCommand}" 
+                            Content="💻 Terminal" 
+                            Height="28" Padding="8,2" FontWeight="SemiBold"
+                            Background="#059669" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
                 </StackPanel>
 
                 <!-- Right: Local Loopback & Status Indicator -->
@@ -290,6 +296,78 @@
                                      Background="#1F2937" Foreground="White" BorderBrush="#4B5563" Padding="6,4" FontSize="12" Margin="0,0,6,0"/>
                             <Button Grid.Column="1" Command="{Binding SendChatMessageCommand}" 
                                     Content="Send" Background="#2563EB" Foreground="White" FontWeight="Bold" Padding="12,4" BorderThickness="0" Cursor="Hand"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Remote Terminal Drawer (Collapsible bottom/overlay panel) -->
+            <Border Grid.ColumnSpan="2" Background="#F00F172A" BorderBrush="#334155" BorderThickness="0,2,0,0"
+                    Height="340" VerticalAlignment="Bottom"
+                    Visibility="{Binding IsTerminalOpen, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Terminal Header -->
+                    <Border Grid.Row="0" Background="#1E293B" Padding="10,6" BorderBrush="#334155" BorderThickness="0,0,0,1">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Command="{Binding ClearTerminalOutputCommand}" 
+                                        Content="Clear" Background="#334155" Foreground="#CBD5E1" FontWeight="SemiBold" Padding="8,2" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
+                                <Button Command="{Binding ToggleTerminalPaneCommand}" 
+                                        Content="✕" Background="Transparent" Foreground="#94A3B8" BorderThickness="0" FontWeight="Bold" FontSize="14" Cursor="Hand"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="💻 Remote Terminal (ConPTY)" FontWeight="Bold" Foreground="#38BDF8" FontSize="13" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                
+                                <TextBlock Text="Shell:" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox ItemsSource="{Binding AvailableShells}" 
+                                          SelectedItem="{Binding SelectedShellType}" 
+                                          Width="110" Height="24" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                                <Button Command="{Binding StartTerminalSessionCommand}" 
+                                        Content="▶ Start" Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="10,2" BorderThickness="0" Cursor="Hand" Margin="0,0,6,0"/>
+                                <Button Command="{Binding CloseTerminalSessionCommand}" 
+                                        Content="⏹ Stop" Background="#DC2626" Foreground="White" FontWeight="Bold" Padding="10,2" BorderThickness="0" Cursor="Hand"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Terminal Output Screen -->
+                    <ScrollViewer Grid.Row="1" Background="#0F172A" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBox Text="{Binding TerminalOutputText, Mode=OneWay}" 
+                                 IsReadOnly="True" 
+                                 Background="Transparent" 
+                                 Foreground="#38BDF8" 
+                                 FontFamily="Consolas" 
+                                 FontSize="13" 
+                                 BorderThickness="0" 
+                                 Padding="10" 
+                                 TextWrapping="Wrap"/>
+                    </ScrollViewer>
+
+                    <!-- Terminal Input Bar -->
+                    <Border Grid.Row="2" Background="#1E293B" Padding="8" BorderBrush="#334155" BorderThickness="0,1,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="PS &gt; " Foreground="#4ADE80" FontFamily="Consolas" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="4,0,4,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding TerminalInputText, UpdateSourceTrigger=PropertyChanged}" 
+                                     Background="#0F172A" Foreground="White" BorderBrush="#475569" FontFamily="Consolas" FontSize="13" Padding="6,4" Margin="0,0,6,0">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding SendTerminalInputCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <Button Grid.Column="2" Command="{Binding SendTerminalInputCommand}" 
+                                    Content="Enter" Background="#2563EB" Foreground="White" FontWeight="Bold" Padding="14,4" BorderThickness="0" Cursor="Hand"/>
                         </Grid>
                     </Border>
                 </Grid>
