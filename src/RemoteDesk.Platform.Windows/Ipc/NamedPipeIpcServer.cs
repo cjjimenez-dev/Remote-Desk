@@ -141,7 +141,7 @@ public sealed class NamedPipeIpcServer : IAsyncDisposable
         }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); } catch (ObjectDisposedException) { }
         }
     }
 

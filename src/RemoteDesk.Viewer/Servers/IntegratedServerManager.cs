@@ -280,76 +280,142 @@ public sealed class IntegratedServerManager : IAsyncDisposable
 
     private const string DashboardHtml = """
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="en" class="dark">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>RemoteDesk - Fleet Dashboard</title>
+        <title>RemoteDesk — Fleet Operations</title>
+        <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%236366F1'/><path d='M8 12h16v10H8z' fill='%2309090B'/><path d='M14 9l4 4-4 4' stroke='%2338BDF8' stroke-width='2' fill='none'/></svg>">
         <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {
+                darkMode: 'class',
+                theme: {
+                    extend: {
+                        colors: {
+                            zinc: {
+                                950: '#09090B',
+                                900: '#121215',
+                                850: '#18181D',
+                                800: '#22222A',
+                                700: '#2E2E38'
+                            }
+                        }
+                    }
+                }
+            }
+        </script>
         <style>
-            body { background-color: #0F172A; color: #F8FAFC; font-family: ui-sans-serif, system-ui, sans-serif; }
-            .badge-online { background-color: rgba(16, 185, 129, 0.2); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.4); }
-            .badge-insession { background-color: rgba(59, 130, 246, 0.2); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.4); }
-            .badge-offline { background-color: rgba(107, 114, 128, 0.2); color: #9CA3AF; border: 1px solid rgba(107, 114, 128, 0.4); }
+            body { 
+                background-color: #09090B; 
+                color: #F4F4F5; 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+                -webkit-font-smoothing: antialiased;
+            }
+            .emil-card {
+                background: #121215;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 12px;
+                transition: border-color 0.15s ease;
+            }
+            .emil-card:hover {
+                border-color: rgba(255, 255, 255, 0.12);
+            }
+            .badge-online { background-color: rgba(16, 185, 129, 0.12); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.25); }
+            .badge-insession { background-color: rgba(59, 130, 246, 0.12); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.25); }
+            .badge-offline { background-color: rgba(113, 113, 122, 0.12); color: #A1A1AA; border: 1px solid rgba(113, 113, 122, 0.25); }
         </style>
     </head>
-    <body class="p-6">
-        <div class="max-w-7xl mx-auto space-y-6">
-            <div class="flex items-center justify-between border-b border-slate-700 pb-4">
+    <body class="p-8 max-w-7xl mx-auto space-y-8">
+        <!-- Header -->
+        <header class="flex items-center justify-between pb-6 border-b border-zinc-800">
+            <div class="flex items-center gap-4">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 p-[1px] shadow-lg shadow-indigo-500/20">
+                    <div class="w-full h-full bg-zinc-950 rounded-[11px] flex items-center justify-center">
+                        <svg class="w-5 h-5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                    </div>
+                </div>
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
-                        <span class="text-blue-400">🌐 RemoteDesk</span>
-                        <span class="text-xs px-2.5 py-1 rounded bg-blue-900/60 text-blue-300 font-semibold border border-blue-700">Fleet Management</span>
-                    </h1>
-                    <p class="text-xs text-slate-400 mt-1">Real-time inventory, telemetry, remote diagnostics and fleet control</p>
-                </div>
-                <div class="flex items-center gap-3">
-                    <button onclick="fetchFleetData()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded border border-slate-600 transition">
-                        🔄 Refresh
-                    </button>
-                    <span id="lastUpdated" class="text-xs text-slate-500 font-mono">Updated just now</span>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-xl font-bold tracking-tight text-white">RemoteDesk</h1>
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">FLEET PRO</span>
+                    </div>
+                    <p class="text-xs text-zinc-400 mt-0.5">Real-time device inventory, telemetry, and distributed management</p>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-                    <div class="text-xs text-slate-400 font-medium">Total Hosts</div>
-                    <div id="statTotal" class="text-2xl font-bold text-white mt-1">0</div>
-                </div>
-                <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-                    <div class="text-xs text-emerald-400 font-medium">🟢 Online & Ready</div>
-                    <div id="statOnline" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
-                </div>
-                <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-                    <div class="text-xs text-blue-400 font-medium">🔵 In Active Session</div>
-                    <div id="statInSession" class="text-2xl font-bold text-blue-400 mt-1">0</div>
-                </div>
-                <div class="bg-slate-800/80 p-4 rounded-lg border border-slate-700">
-                    <div class="text-xs text-slate-400 font-medium">⚪ Offline</div>
-                    <div id="statOffline" class="text-2xl font-bold text-slate-400 mt-1">0</div>
+            <div class="flex items-center gap-3">
+                <button onclick="fetchFleetData()" class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold rounded-lg border border-zinc-800 hover:border-zinc-700 transition flex items-center gap-2 shadow-sm">
+                    <span>🔄 Refresh</span>
+                    <kbd class="px-1.5 py-0.5 text-[10px] bg-zinc-950 text-zinc-500 rounded border border-zinc-800">F5</kbd>
+                </button>
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/60 rounded-lg border border-zinc-800/80">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span id="lastUpdated" class="text-xs text-zinc-400 font-mono">Live</span>
                 </div>
             </div>
+        </header>
 
-            <div class="bg-slate-800/80 rounded-lg border border-slate-700 overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs text-slate-300">
-                        <thead class="bg-slate-900/80 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-700">
-                            <tr>
-                                <th class="py-3 px-4">Status</th>
-                                <th class="py-3 px-4">Device ID</th>
-                                <th class="py-3 px-4">Hostname</th>
-                                <th class="py-3 px-4">OS / Specs</th>
-                                <th class="py-3 px-4">IP Address</th>
-                                <th class="py-3 px-4">Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody id="deviceTableBody" class="divide-y divide-slate-700/60 font-mono">
-                            <tr><td colspan="6" class="text-center py-8 text-slate-500">Loading fleet inventory...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+        <!-- KPI Cards -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="emil-card p-5">
+                <div class="text-xs text-zinc-400 font-medium">Total Managed Hosts</div>
+                <div id="statTotal" class="text-3xl font-extrabold text-white mt-2 tracking-tight">0</div>
             </div>
-        </div>
+            <div class="emil-card p-5">
+                <div class="flex items-center justify-between">
+                    <div class="text-xs text-emerald-400 font-medium">Online & Ready</div>
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                </div>
+                <div id="statOnline" class="text-3xl font-extrabold text-emerald-400 mt-2 tracking-tight">0</div>
+            </div>
+            <div class="emil-card p-5">
+                <div class="flex items-center justify-between">
+                    <div class="text-xs text-blue-400 font-medium">In Active Session</div>
+                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                </div>
+                <div id="statInSession" class="text-3xl font-extrabold text-blue-400 mt-2 tracking-tight">0</div>
+            </div>
+            <div class="emil-card p-5">
+                <div class="flex items-center justify-between">
+                    <div class="text-xs text-zinc-500 font-medium">Offline</div>
+                    <span class="w-2 h-2 rounded-full bg-zinc-600"></span>
+                </div>
+                <div id="statOffline" class="text-3xl font-extrabold text-zinc-400 mt-2 tracking-tight">0</div>
+            </div>
+        </section>
+
+        <!-- Inventory Table -->
+        <section class="emil-card overflow-hidden">
+            <div class="px-6 py-4 border-b border-zinc-800/80 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-white">Managed Endpoints</h2>
+                <span class="text-xs text-zinc-500">Auto-refreshes every 5s</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-zinc-300">
+                    <thead class="bg-zinc-950/60 text-zinc-400 uppercase font-semibold text-[10px] tracking-wider border-b border-zinc-800">
+                        <tr>
+                            <th class="py-3.5 px-6">Status</th>
+                            <th class="py-3.5 px-6">Device ID</th>
+                            <th class="py-3.5 px-6">Hostname</th>
+                            <th class="py-3.5 px-6">Operating System</th>
+                            <th class="py-3.5 px-6">IP Address</th>
+                            <th class="py-3.5 px-6">Last Heartbeat</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deviceTableBody" class="divide-y divide-zinc-800/60 font-mono">
+                        <tr><td colspan="6" class="text-center py-10 text-zinc-500 font-sans">Connecting to Fleet telemetry service...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
         <script>
             async function fetchFleetData() {
@@ -369,20 +435,20 @@ public sealed class IntegratedServerManager : IAsyncDisposable
 
                     const tbody = document.getElementById('deviceTableBody');
                     if (devices.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500 font-sans">No matching devices found in fleet.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-12 text-zinc-500 font-sans">No host devices registered in fleet yet.</td></tr>`;
                         return;
                     }
                     tbody.innerHTML = devices.map(d => {
                         let badge = d.status === 1 ? 'badge-online' : (d.status === 2 ? 'badge-insession' : 'badge-offline');
                         let txt = d.status === 1 ? 'Online' : (d.status === 2 ? 'In Session' : 'Offline');
                         return `
-                            <tr class="hover:bg-slate-700/30">
-                                <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-[11px] font-semibold ${badge}">${txt}</span></td>
-                                <td class="py-3 px-4 font-bold text-sky-400">${d.deviceId}</td>
-                                <td class="py-3 px-4 font-semibold text-white">${d.hostname}</td>
-                                <td class="py-3 px-4 text-slate-400">${d.operatingSystem || 'Windows'}</td>
-                                <td class="py-3 px-4">${d.ipAddress || '—'}</td>
-                                <td class="py-3 px-4 text-slate-400">${new Date(d.lastHeartbeatUtc).toLocaleTimeString()}</td>
+                            <tr class="hover:bg-zinc-800/20 transition">
+                                <td class="py-3.5 px-6"><span class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${badge}">${txt}</span></td>
+                                <td class="py-3.5 px-6 font-bold text-sky-400">${d.deviceId}</td>
+                                <td class="py-3.5 px-6 font-semibold text-white font-sans">${d.hostname}</td>
+                                <td class="py-3.5 px-6 text-zinc-400 font-sans">${d.operatingSystem || 'Windows'}</td>
+                                <td class="py-3.5 px-6">${d.ipAddress || '—'}</td>
+                                <td class="py-3.5 px-6 text-zinc-400">${new Date(d.lastHeartbeatUtc).toLocaleTimeString()}</td>
                             </tr>
                         `;
                     }).join('');
