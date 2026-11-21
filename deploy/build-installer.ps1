@@ -22,6 +22,7 @@ New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 
 $projects = @(
     @{ Name = "RemoteDesk.Viewer"; Path = "src/RemoteDesk.Viewer/RemoteDesk.Viewer.csproj"; Runtime = "win-x64" },
+    @{ Name = "RemoteDesk.Host"; Path = "src/RemoteDesk.Host/RemoteDesk.Host.csproj"; Runtime = "win-x64" },
     @{ Name = "RemoteDesk.Host.Service"; Path = "src/RemoteDesk.Host.Service/RemoteDesk.Host.Service.csproj"; Runtime = "win-x64" },
     @{ Name = "RemoteDesk.Host.Agent"; Path = "src/RemoteDesk.Host.Agent/RemoteDesk.Host.Agent.csproj"; Runtime = "win-x64" },
     @{ Name = "RemoteDesk.Updater"; Path = "src/RemoteDesk.Updater/RemoteDesk.Updater.csproj"; Runtime = "win-x64" },
