@@ -7,7 +7,9 @@ using CommunityToolkit.Mvvm.Input;
 using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
+using RemoteDesk.Core.Security;
 using RemoteDesk.Platform.Windows;
+using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Transport.WebRtc;
 using RemoteDesk.Viewer.Rendering;
 using Serilog;
@@ -21,6 +23,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     private readonly Dispatcher _dispatcher;
     private readonly WriteableBitmapVideoRenderer _renderer;
+    private readonly DeviceIdentity _identity;
 
     // Local Loopback components
     private IScreenCapturer? _capturer;
@@ -34,10 +37,25 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private WebRtcTransport? _transport;
     private IVideoDecoder? _decoder;
     private string? _activeHostConnId;
+    private string? _activeSessionId;
+    private string? _activeHostDeviceId;
+    private SessionPermissions _grantedPermissions = SessionPermissions.All;
 
     private readonly DispatcherTimer _statsTimer;
     private int _framesThisInterval;
     private long _bytesThisInterval;
+
+    [ObservableProperty]
+    private string _localDeviceId = string.Empty;
+
+    [ObservableProperty]
+    private string _securityStatusBadge = "🔒 Disconnected";
+
+    [ObservableProperty]
+    private string _securityStatusColor = "#6B7280";
+
+    [ObservableProperty]
+    private string _grantedPermissionsText = "Full Access";
     private double _sumEncodeMs;
     private double _sumDecodeMs;
     private double _sumLatencyMs;
@@ -115,6 +133,10 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
+        var keyStore = new DpapiDeviceKeyStore();
+        _identity = new DeviceIdentity(keyStore);
+        LocalDeviceId = _identity.DeviceId;
+
         _renderer = new WriteableBitmapVideoRenderer(dispatcher);
         _renderer.FrameRendered += () =>
         {
@@ -206,10 +228,18 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 });
             };
 
-            _signalingClient.ConnectionAccepted += async (sessionId, hostConnId) =>
+            _signalingClient.ConnectionAccepted += async res =>
             {
-                _activeHostConnId = hostConnId;
-                _dispatcher.Invoke(() => StatusText = $"Host accepted connection [{sessionId}]. Negotiating WebRTC P2P...");
+                _activeHostConnId = res.HostConnectionId;
+                _activeSessionId = res.SessionId;
+                _activeHostDeviceId = res.HostDeviceId;
+                _grantedPermissions = res.GrantedPermissions;
+
+                _dispatcher.Invoke(() =>
+                {
+                    GrantedPermissionsText = _grantedPermissions.ToString();
+                    StatusText = $"Host [{res.HostDeviceId}] accepted connection [{res.SessionId}]. Negotiating WebRTC...";
+                });
 
                 try
                 {
@@ -273,8 +303,8 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                             {
                                 IsRemoteSessionActive = true;
                                 IsConnecting = false;
-                                IsInputEnabled = true;
-                                StatusText = $"Connected to [{TargetHostId}] via WebRTC (P2P direct)";
+                                IsInputEnabled = _grantedPermissions.HasFlag(SessionPermissions.Control);
+                                StatusText = $"Connected to [{TargetHostId}] via WebRTC ({ConnectionPathBadge})";
                                 _statsTimer.Start();
                             }
                             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
@@ -290,9 +320,23 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                         OnRemoteVideoPacketReceived(packet);
                     };
 
-                    // Create and send SDP Offer
+                    // Create and cryptographically sign SDP Offer
                     var offerSdp = await _transport.CreateOfferAsync();
-                    await _signalingClient.SendOfferAsync(hostConnId, offerSdp);
+                    var (fingerprint, signature, pubKey, timestamp) = DtlsFingerprintProtector.SignSdp(
+                        _identity,
+                        res.SessionId,
+                        res.HostConnectionId,
+                        offerSdp);
+
+                    await _signalingClient.SendOfferAsync(
+                        res.HostConnectionId,
+                        res.SessionId,
+                        offerSdp,
+                        _identity.DeviceId,
+                        pubKey,
+                        fingerprint,
+                        signature,
+                        timestamp);
                 }
                 catch (Exception ex)
                 {
@@ -305,26 +349,72 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 }
             };
 
-            _signalingClient.AnswerReceived += async (fromConnId, sdp) =>
+            _signalingClient.AnswerReceived += async answer =>
             {
-                if (fromConnId == _activeHostConnId && _transport != null)
+                if (answer.FromConnectionId == _activeHostConnId && _transport != null)
                 {
-                    Logger.Information("Received SDP answer from Host.");
-                    await _transport.SetRemoteDescriptionAsync(RTCSdpType.answer, sdp);
+                    Logger.Information("Received SDP answer from Host. Verifying DTLS fingerprint signature...");
+
+                    if (answer.DtlsFingerprintSignature != null && answer.SenderPublicKey != null)
+                    {
+                        var valid = DtlsFingerprintProtector.VerifySignedSdp(
+                            answer.Sdp,
+                            answer.SessionId,
+                            answer.SenderDeviceId,
+                            answer.TargetConnectionId,
+                            answer.DtlsFingerprint,
+                            answer.DtlsFingerprintSignature,
+                            answer.SenderPublicKey,
+                            answer.Timestamp);
+
+                        if (!valid)
+                        {
+                            Logger.Error("SECURITY ALERT: Host SDP Answer DTLS fingerprint signature mismatch or expired! Possible MITM tampering.");
+                            _dispatcher.Invoke(() =>
+                            {
+                                StatusText = "SECURITY ALERT: SDP Answer DTLS fingerprint signature mismatch! Session aborted.";
+                                SecurityStatusBadge = "⚠️ MITM Tampering Detected";
+                                SecurityStatusColor = "#EF4444";
+                                DisconnectRemote();
+                            });
+                            return;
+                        }
+
+                        Logger.Information(">>> Host DTLS Fingerprint signature successfully verified against Host ECDSA public key!");
+                        _dispatcher.Invoke(() =>
+                        {
+                            SecurityStatusBadge = "🔒 Verified E2EE (ECDSA)";
+                            SecurityStatusColor = "#10B981";
+                        });
+                    }
+
+                    await _transport.SetRemoteDescriptionAsync(RTCSdpType.answer, answer.Sdp);
                 }
             };
 
-            _signalingClient.IceCandidateReceived += (fromConnId, candidate, sdpMid, sdpMLineIndex) =>
+            _signalingClient.IceCandidateReceived += ice =>
             {
-                if (fromConnId == _activeHostConnId && _transport != null)
+                if (ice.FromConnectionId == _activeHostConnId && _transport != null)
                 {
-                    _transport.AddIceCandidate(candidate, sdpMid, sdpMLineIndex);
+                    _transport.AddIceCandidate(ice.Candidate, ice.SdpMid, (ushort)ice.SdpMLineIndex);
                 }
             };
 
             await _signalingClient.ConnectAsync();
-            StatusText = $"Requesting session with Host [{TargetHostId}]...";
-            await _signalingClient.RequestConnectionAsync(TargetHostId, ViewerName);
+            StatusText = $"Requesting authenticated session with Host [{TargetHostId}]...";
+
+            // Sign connection request with Viewer DeviceIdentity
+            var reqTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var reqPayload = $"{TargetHostId}:{_identity.DeviceId}:{reqTimestamp}";
+            var reqSig = _identity.Sign(reqPayload);
+
+            await _signalingClient.RequestConnectionAsync(
+                TargetHostId,
+                ViewerName,
+                _identity.DeviceId,
+                _identity.PublicKeyBytes,
+                reqSig,
+                reqTimestamp);
         }
         catch (Exception ex)
         {
@@ -355,8 +445,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _decoder = null;
 
         _activeHostConnId = null;
+        _activeSessionId = null;
+        _activeHostDeviceId = null;
         IsRemoteSessionActive = false;
         IsConnecting = false;
+        IsInputEnabled = false;
+        ConnectionPath = ConnectionPath.Unknown;
+        ConnectionPathBadge = "⚪ P2P";
+        ConnectionPathColor = "#6B7280";
+        SecurityStatusBadge = "🔒 Disconnected";
+        SecurityStatusColor = "#6B7280";
         StatusText = "Disconnected.";
     }
 
@@ -658,5 +756,6 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         DisconnectRemote();
         StopLoopback();
         _renderer.Dispose();
+        _identity.Dispose();
     }
 }

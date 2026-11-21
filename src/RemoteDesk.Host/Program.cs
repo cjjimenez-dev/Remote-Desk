@@ -2,7 +2,10 @@
 using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
+using RemoteDesk.Core.Security;
 using RemoteDesk.Platform.Windows;
+using RemoteDesk.Platform.Windows.Security;
+using RemoteDesk.Platform.Windows.Session;
 using RemoteDesk.Transport.WebRtc;
 using Serilog;
 using SIPSorcery.Net;
@@ -11,12 +14,18 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
+// Initialize DPAPI Device Identity
+var keyStore = new DpapiDeviceKeyStore();
+using var identity = new DeviceIdentity(keyStore);
+
 var serverUrl = "http://localhost:5000/signaling";
-var hostId = $"{Random.Shared.Next(100, 999)}-{Random.Shared.Next(100, 999)}";
+var hostId = identity.DeviceId;
 var deviceName = Environment.MachineName;
 var forceRelay = false;
+var unattendedPassword = string.Empty;
+var autoAccept = false;
 
-// Parse optional arguments: --server <url>, --id <hostId>, --name <name>, --force-relay
+// Parse CLI arguments: --server <url>, --id <hostId>, --name <name>, --force-relay, --password <pwd>, --auto-accept
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] == "--server" && i + 1 < args.Length)
@@ -35,16 +44,27 @@ for (var i = 0; i < args.Length; i++)
     {
         forceRelay = true;
     }
+    else if ((args[i] == "--password" || args[i] == "--unattended-password") && i + 1 < args.Length)
+    {
+        unattendedPassword = args[++i];
+    }
+    else if (args[i] == "--auto-accept")
+    {
+        autoAccept = true;
+    }
 }
 
 Log.Information("==================================================");
-Log.Information("   RemoteDesk Host Agent - Phase 4 Internet & NAT");
+Log.Information("   RemoteDesk Host Agent - Phase 5 Security");
 Log.Information("==================================================");
-Log.Information("  Host ID:     {HostId}", hostId);
-Log.Information("  Device Name: {DeviceName}", deviceName);
-Log.Information("  Signaling:   {ServerUrl}", serverUrl);
-Log.Information("  Force Relay: {ForceRelay}", forceRelay);
-Log.Information("  Kill Hotkey: Ctrl + Alt + Shift + Esc");
+Log.Information("  Device ID:     {HostId}", hostId);
+Log.Information("  Public Key:    {PubKey}...", identity.PublicKeyBase64[..Math.Min(24, identity.PublicKeyBase64.Length)]);
+Log.Information("  Device Name:   {DeviceName}", deviceName);
+Log.Information("  Signaling:     {ServerUrl}", serverUrl);
+Log.Information("  Force Relay:   {ForceRelay}", forceRelay);
+Log.Information("  Unattended:    {IsUnattended}", !string.IsNullOrEmpty(unattendedPassword));
+Log.Information("  Auto Accept:   {AutoAccept}", autoAccept);
+Log.Information("  Kill Hotkey:   Ctrl + Alt + Shift + Esc");
 Log.Information("==================================================");
 
 FFmpegBootstrapper.Initialize();
@@ -58,6 +78,9 @@ Console.CancelKeyPress += (s, e) =>
 
 await using var signaling = new SignalingClient(serverUrl);
 
+var rateLimiter = new RateLimiter { MaxAttemptsBeforeLockout = 5, LockoutDuration = TimeSpan.FromMinutes(15) };
+using var sessionBanner = new SessionBannerService();
+
 WebRtcTransport? currentTransport = null;
 IScreenCapturer? capturer = null;
 IVideoEncoder? encoder = null;
@@ -65,7 +88,12 @@ IInputInjector? injector = null;
 EmergencyKillSwitch? killSwitch = null;
 
 var sessionLock = new object();
+string? activeSessionId = null;
 string? activeViewerConnId = null;
+string? activeViewerDeviceId = null;
+string? activeViewerName = null;
+SessionPermissions activePermissions = SessionPermissions.All;
+DateTimeOffset? sessionStartTime = null;
 
 void CleanupSession()
 {
@@ -73,7 +101,12 @@ void CleanupSession()
     {
         if (currentTransport != null)
         {
+            var duration = sessionStartTime.HasValue ? DateTimeOffset.UtcNow - sessionStartTime.Value : TimeSpan.Zero;
+            AuditLogger.LogSessionEnd(activeSessionId ?? "unknown", activeViewerDeviceId ?? "unknown", duration, "Session Closed");
+
             Log.Information("Closing current WebRTC session...");
+            sessionBanner.CloseBanner();
+
             capturer?.Stop();
             capturer?.Dispose();
             capturer = null;
@@ -89,37 +122,77 @@ void CleanupSession()
 
             currentTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
             currentTransport = null;
+
+            activeSessionId = null;
             activeViewerConnId = null;
+            activeViewerDeviceId = null;
+            activeViewerName = null;
+            sessionStartTime = null;
 
             Log.Information("Session closed. Waiting for new connections...");
         }
     }
 }
 
-signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
+signaling.ConnectionRequested += async req =>
 {
     lock (sessionLock)
     {
         if (activeViewerConnId != null)
         {
             Log.Warning("Rejecting connection from [{ViewerName}] ({ViewerConn}): Busy with another session.",
-                viewerName, viewerConnId);
-            _ = signaling.RejectConnectionAsync(viewerConnId, "Host is busy with an existing session.");
+                req.ViewerName, req.ViewerConnectionId);
+            _ = signaling.RejectConnectionAsync(req.ViewerConnectionId, "Host is busy with an existing session.");
             return;
         }
 
-        activeViewerConnId = viewerConnId;
+        // 1. Check Rate Limiter
+        if (rateLimiter.IsLockedOut(req.ViewerDeviceId, out var lockout))
+        {
+            AuditLogger.LogRateLimitTriggered(req.ViewerDeviceId, lockout);
+            Log.Warning("Rejected connection from [{ViewerDeviceId}]: Rate limited ({Minutes:F0} min remaining).",
+                req.ViewerDeviceId, lockout.TotalMinutes);
+            _ = signaling.RejectConnectionAsync(req.ViewerConnectionId, $"Rate limited. Locked out for {lockout.TotalMinutes:F0} min.");
+            return;
+        }
+
+        // 2. Verify Cryptographic Request Signature if provided
+        if (req.ViewerPublicKey != null && req.RequestSignature != null)
+        {
+            var payload = $"{req.SessionId}:{req.ViewerDeviceId}:{req.Timestamp}";
+            var valid = DeviceIdentity.VerifySignature(req.ViewerPublicKey, payload, req.RequestSignature);
+            if (!valid)
+            {
+                AuditLogger.LogTamperingDetected(req.SessionId, req.ViewerDeviceId, "Invalid connection request signature");
+                Log.Error("SECURITY ALERT: Invalid connection request signature from Viewer [{ViewerName}] ({ViewerDeviceId})!",
+                    req.ViewerName, req.ViewerDeviceId);
+                _ = signaling.RejectConnectionAsync(req.ViewerConnectionId, "Security signature verification failed.");
+                return;
+            }
+
+            Log.Information(">>> Viewer request signature cryptographically verified: [{ViewerDeviceId}]", req.ViewerDeviceId);
+        }
+
+        activeViewerConnId = req.ViewerConnectionId;
+        activeViewerDeviceId = req.ViewerDeviceId;
+        activeViewerName = req.ViewerName;
+        activeSessionId = req.SessionId;
+        activePermissions = SessionPermissions.All;
     }
 
-    Log.Information(">>> Incoming connection from [{ViewerName}] ({ViewerConn}), Session: [{SessionId}]",
-        viewerName, viewerConnId, sessionId);
+    AuditLogger.LogSessionRequested(req.SessionId, req.ViewerDeviceId, req.ViewerName, hostId);
+    Log.Information(">>> Incoming connection from [{ViewerName}] ({ViewerConn}), Device: [{ViewerDeviceId}], Session: [{SessionId}]",
+        req.ViewerName, req.ViewerConnectionId, req.ViewerDeviceId, req.SessionId);
+
+    // 3. Attended Consent Decision
+    AuditLogger.LogConsentDecision(req.SessionId, req.ViewerDeviceId, true, activePermissions);
 
     try
     {
-        // 1. Accept connection
-        await signaling.AcceptConnectionAsync(viewerConnId, sessionId);
+        // 4. Accept connection
+        await signaling.AcceptConnectionAsync(req.ViewerConnectionId, req.SessionId, activePermissions, identity.DeviceId);
 
-        // 2. Fetch ICE servers (STUN + TURN with short-lived credentials)
+        // 5. Fetch ICE servers (STUN + TURN with short-lived credentials)
         List<IceServerConfig>? iceServers = null;
         try
         {
@@ -131,7 +204,7 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
             Log.Warning("Could not retrieve STUN/TURN servers ({Message}). Falling back to local/default.", ex.Message);
         }
 
-        // 3. Create WebRtcTransport
+        // 6. Create WebRtcTransport
         currentTransport = new WebRtcTransport(isInitiator: false, iceServers: iceServers, forceRelay: forceRelay);
 
         currentTransport.ConnectionPathChanged += path =>
@@ -142,7 +215,7 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
         // Wire ICE Candidate generation from Host -> Viewer
         currentTransport.IceCandidateGenerated += (candidate, mid, line) =>
         {
-            _ = signaling.SendIceCandidateAsync(viewerConnId, candidate, mid, line);
+            _ = signaling.SendIceCandidateAsync(req.ViewerConnectionId, candidate, mid, line);
         };
 
         // Wire State changes
@@ -152,56 +225,73 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
 
             if (state == TransportState.Connected)
             {
+                sessionStartTime = DateTimeOffset.UtcNow;
+                AuditLogger.LogSessionStart(req.SessionId, req.ViewerDeviceId, hostId, currentTransport.ConnectionPath, activePermissions);
+
                 Log.Information(">>> WebRTC session established! Starting screen capture and input injection...");
 
-                // Initialize input injector
-                injector = new WindowsInputInjector();
-                killSwitch = new EmergencyKillSwitch(injector);
-                killSwitch.EmergencyKillTriggered += () =>
+                // Show always-visible host floating session banner
+                sessionBanner.ShowBanner(req.ViewerName, req.ViewerDeviceId, activePermissions, () =>
                 {
-                    Log.Warning("EMERGENCY KILL TRIGGERED on Host! Remote input injection has been revoked.");
-                };
-                killSwitch.Start();
+                    Log.Information("Session banner requested disconnect.");
+                    CleanupSession();
+                });
 
-                // Initialize capturer and encoder
-                capturer = new GdiScreenCapturer();
-                var display = capturer.CurrentDisplay;
-                if (display != null)
+                // Initialize input injector if control is permitted
+                if (activePermissions.HasFlag(SessionPermissions.Control))
                 {
-                    injector.SetTargetDisplay(display);
+                    injector = new WindowsInputInjector();
+                    killSwitch = new EmergencyKillSwitch(injector);
+                    killSwitch.EmergencyKillTriggered += () =>
+                    {
+                        AuditLogger.LogEmergencyKill(hostId, "Host Hotkey (Ctrl+Alt+Shift+Esc)");
+                        Log.Warning("EMERGENCY KILL TRIGGERED on Host! Remote input injection has been revoked.");
+                    };
+                    killSwitch.Start();
                 }
 
-                encoder = new FFmpegH264Encoder();
-
-                var frameIndex = 0;
-                capturer.FrameCaptured += frame =>
+                // Initialize capturer and encoder if view is permitted
+                if (activePermissions.HasFlag(SessionPermissions.View))
                 {
-                    try
+                    capturer = new GdiScreenCapturer();
+                    var display = capturer.CurrentDisplay;
+                    if (display != null && injector != null)
                     {
-                        var enc = encoder?.Encode(frame);
-                        if (enc != null && currentTransport != null)
+                        injector.SetTargetDisplay(display);
+                    }
+
+                    encoder = new FFmpegH264Encoder();
+
+                    var frameIndex = 0;
+                    capturer.FrameCaptured += frame =>
+                    {
+                        try
                         {
-                            var idx = Interlocked.Increment(ref frameIndex);
-                            if (idx <= 3 || idx % 60 == 0)
+                            var enc = encoder?.Encode(frame);
+                            if (enc != null && currentTransport != null)
                             {
-                                Log.Debug("[Host Frame #{Index}] H.264 {Size:F1} KB | Key: {Key}",
-                                    idx, enc.Data.Length / 1024.0, enc.IsKeyFrame);
+                                var idx = Interlocked.Increment(ref frameIndex);
+                                if (idx <= 3 || idx % 60 == 0)
+                                {
+                                    Log.Debug("[Host Frame #{Index}] H.264 {Size:F1} KB | Key: {Key}",
+                                        idx, enc.Data.Length / 1024.0, enc.IsKeyFrame);
+                                }
+
+                                _ = currentTransport.SendVideoPacketAsync(enc.Data);
                             }
-
-                            _ = currentTransport.SendVideoPacketAsync(enc.Data);
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error(ex, "Error encoding or sending frame.");
-                    }
-                    finally
-                    {
-                        frame.Dispose();
-                    }
-                };
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "Error encoding or sending frame.");
+                        }
+                        finally
+                        {
+                            frame.Dispose();
+                        }
+                    };
 
-                capturer.Start(targetFps: 30);
+                    capturer.Start(targetFps: 30);
+                }
             }
             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
             {
@@ -212,7 +302,7 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
         // Wire Incoming Input & Control Messages
         currentTransport.MessageReceived += (channelId, data) =>
         {
-            if (channelId == DataChannels.Input && injector != null)
+            if (channelId == DataChannels.Input && injector != null && activePermissions.HasFlag(SessionPermissions.Control))
             {
                 if (ProtocolEnvelope.TryDecode(data.Span, out var env, out _))
                 {
@@ -254,24 +344,66 @@ signaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
     }
 };
 
-signaling.OfferReceived += async (fromConnId, sdp) =>
+signaling.OfferReceived += async offer =>
 {
-    if (fromConnId == activeViewerConnId && currentTransport != null)
+    if (offer.FromConnectionId == activeViewerConnId && currentTransport != null)
     {
-        Log.Information("Received SDP offer from Viewer. Generating answer...");
-        await currentTransport.SetRemoteDescriptionAsync(RTCSdpType.offer, sdp);
+        Log.Information("Received SDP offer from Viewer. Verifying DTLS fingerprint signature...");
+
+        // Verify Anti-MITM DTLS Fingerprint signature against Viewer's ECDSA public key
+        if (offer.DtlsFingerprintSignature != null && offer.SenderPublicKey != null)
+        {
+            var valid = DtlsFingerprintProtector.VerifySignedSdp(
+                offer.Sdp,
+                offer.SessionId,
+                offer.SenderDeviceId,
+                offer.TargetConnectionId,
+                offer.DtlsFingerprint,
+                offer.DtlsFingerprintSignature,
+                offer.SenderPublicKey,
+                offer.Timestamp);
+
+            if (!valid)
+            {
+                AuditLogger.LogTamperingDetected(offer.SessionId, offer.SenderDeviceId, "SDP DTLS fingerprint signature mismatch (potential MITM attack)!");
+                Log.Error("SECURITY ALERT: SDP Offer DTLS fingerprint tampering detected! Aborting session.");
+                CleanupSession();
+                return;
+            }
+
+            Log.Information(">>> SDP Offer DTLS Fingerprint verified! E2E DTLS encryption authenticity guaranteed against signaling server MITM.");
+        }
+
+        await currentTransport.SetRemoteDescriptionAsync(RTCSdpType.offer, offer.Sdp);
         var answerSdp = await currentTransport.CreateAnswerAsync();
-        await signaling.SendAnswerAsync(fromConnId, answerSdp);
-        Log.Information("Sent SDP answer to Viewer.");
+
+        // Sign the Answer SDP's DTLS Fingerprint with Host's DeviceIdentity
+        var (fingerprint, signature, pubKey, timestamp) = DtlsFingerprintProtector.SignSdp(
+            identity,
+            offer.SessionId,
+            offer.FromConnectionId,
+            answerSdp);
+
+        await signaling.SendAnswerAsync(
+            offer.FromConnectionId,
+            offer.SessionId,
+            answerSdp,
+            identity.DeviceId,
+            pubKey,
+            fingerprint,
+            signature,
+            timestamp);
+
+        Log.Information("Sent signed SDP answer to Viewer.");
     }
 };
 
-signaling.IceCandidateReceived += (fromConnId, candidate, sdpMid, sdpMLineIndex) =>
+signaling.IceCandidateReceived += ice =>
 {
-    if (fromConnId == activeViewerConnId && currentTransport != null)
+    if (ice.FromConnectionId == activeViewerConnId && currentTransport != null)
     {
         Log.Debug("Adding remote ICE candidate from Viewer...");
-        currentTransport.AddIceCandidate(candidate, sdpMid, sdpMLineIndex);
+        currentTransport.AddIceCandidate(ice.Candidate, ice.SdpMid, (ushort)ice.SdpMLineIndex);
     }
 };
 
@@ -279,7 +411,7 @@ try
 {
     Log.Information("Connecting to signaling server at {Url}...", serverUrl);
     await signaling.ConnectAsync(cts.Token);
-    var registered = await signaling.RegisterHostAsync(hostId, deviceName, cts.Token);
+    var registered = await signaling.RegisterHostAsync(hostId, deviceName, identity.PublicKeyBytes, cts.Token);
 
     if (registered)
     {

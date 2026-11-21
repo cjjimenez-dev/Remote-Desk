@@ -58,15 +58,15 @@ public class SignalingAndWebRtcE2ETests
             var rtcConfig = new RTCConfiguration { iceServers = new List<RTCIceServer>() };
 
             // Host side signaling handlers
-            hostSignaling.ConnectionRequested += async (sessionId, viewerConnId, viewerName) =>
+            hostSignaling.ConnectionRequested += async req =>
             {
-                await hostSignaling.AcceptConnectionAsync(viewerConnId, sessionId);
+                await hostSignaling.AcceptConnectionAsync(req.ViewerConnectionId, req.SessionId);
 
                 hostTransport = new WebRtcTransport(isInitiator: false, rtcConfig);
 
                 hostTransport.IceCandidateGenerated += (candidate, mid, line) =>
                 {
-                    _ = hostSignaling.SendIceCandidateAsync(viewerConnId, candidate, mid, line);
+                    _ = hostSignaling.SendIceCandidateAsync(req.ViewerConnectionId, candidate, mid, line);
                 };
 
                 hostTransport.StateChanged += state =>
@@ -88,29 +88,29 @@ public class SignalingAndWebRtcE2ETests
                 };
             };
 
-            hostSignaling.OfferReceived += async (fromConnId, sdp) =>
+            hostSignaling.OfferReceived += async offer =>
             {
                 if (hostTransport != null)
                 {
-                    await hostTransport.SetRemoteDescriptionAsync(RTCSdpType.offer, sdp);
+                    await hostTransport.SetRemoteDescriptionAsync(RTCSdpType.offer, offer.Sdp);
                     var answerSdp = await hostTransport.CreateAnswerAsync();
-                    await hostSignaling.SendAnswerAsync(fromConnId, answerSdp);
+                    await hostSignaling.SendAnswerAsync(offer.FromConnectionId, answerSdp);
                 }
             };
 
-            hostSignaling.IceCandidateReceived += (fromConnId, candidate, mid, line) =>
+            hostSignaling.IceCandidateReceived += ice =>
             {
-                hostTransport?.AddIceCandidate(candidate, mid, line);
+                hostTransport?.AddIceCandidate(ice.Candidate, ice.SdpMid, (ushort)ice.SdpMLineIndex);
             };
 
             // Viewer side signaling handlers
-            viewerSignaling.ConnectionAccepted += async (sessionId, hostConnId) =>
+            viewerSignaling.ConnectionAccepted += async res =>
             {
                 viewerTransport = new WebRtcTransport(isInitiator: true, rtcConfig);
 
                 viewerTransport.IceCandidateGenerated += (candidate, mid, line) =>
                 {
-                    _ = viewerSignaling.SendIceCandidateAsync(hostConnId, candidate, mid, line);
+                    _ = viewerSignaling.SendIceCandidateAsync(res.HostConnectionId, candidate, mid, line);
                 };
 
                 viewerTransport.StateChanged += state =>
@@ -125,20 +125,20 @@ public class SignalingAndWebRtcE2ETests
                 };
 
                 var offerSdp = await viewerTransport.CreateOfferAsync();
-                await viewerSignaling.SendOfferAsync(hostConnId, offerSdp);
+                await viewerSignaling.SendOfferAsync(res.HostConnectionId, offerSdp);
             };
 
-            viewerSignaling.AnswerReceived += async (fromConnId, sdp) =>
+            viewerSignaling.AnswerReceived += async answer =>
             {
                 if (viewerTransport != null)
                 {
-                    await viewerTransport.SetRemoteDescriptionAsync(RTCSdpType.answer, sdp);
+                    await viewerTransport.SetRemoteDescriptionAsync(RTCSdpType.answer, answer.Sdp);
                 }
             };
 
-            viewerSignaling.IceCandidateReceived += (fromConnId, candidate, mid, line) =>
+            viewerSignaling.IceCandidateReceived += ice =>
             {
-                viewerTransport?.AddIceCandidate(candidate, mid, line);
+                viewerTransport?.AddIceCandidate(ice.Candidate, ice.SdpMid, (ushort)ice.SdpMLineIndex);
             };
 
             // 3. Initiate Connection Request from Viewer

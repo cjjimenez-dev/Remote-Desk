@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 4 Internet Connectivity &amp; TURN"
+        Title="RemoteDesk Viewer - Phase 5 Connection Flow &amp; Security"
         Height="800" Width="1280"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
@@ -28,9 +28,13 @@
                 <!-- Left: Branding & Remote Host Connection Controls -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,14,0" VerticalAlignment="Center"/>
-                    <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,16,0" VerticalAlignment="Center">
-                        <TextBlock Text="Phase 4: Internet &amp; NAT" FontSize="11" Foreground="#9CA3AF"/>
+                    <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,14,0" VerticalAlignment="Center">
+                        <TextBlock Text="Phase 5: Security &amp; Anti-MITM" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
+
+                    <!-- My Local Device ID Display -->
+                    <TextBlock Text="My ID:" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBlock Text="{Binding LocalDeviceId}" FontFamily="Consolas" FontWeight="Bold" Foreground="#A78BFA" VerticalAlignment="Center" Margin="0,0,14,0"/>
 
                     <!-- Remote Host ID Input -->
                     <TextBlock Text="Host ID:" Foreground="#E5E7EB" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,6,0"/>
@@ -143,6 +147,11 @@
                     
                     <!-- Badges Row -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <!-- Security Verification Status Badge -->
+                        <Border Background="{Binding SecurityStatusColor}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding SecurityStatusBadge}" FontWeight="Bold" Foreground="White" FontSize="11"/>
+                        </Border>
+
                         <!-- Connection Path Badge (Direct LAN, STUN Hole-punch, or TURN Relayed) -->
                         <Border Background="{Binding ConnectionPathColor}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
                             <TextBlock Text="{Binding ConnectionPathBadge}" FontWeight="Bold" Foreground="White" FontSize="11"/>
@@ -160,6 +169,11 @@
                         <Border Background="#4C1D95" CornerRadius="4" Padding="6,2">
                             <TextBlock Text="{Binding BitrateText}" FontWeight="Bold" Foreground="#C084FC" FontSize="12"/>
                         </Border>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="Permissions: " Foreground="#9CA3AF" FontSize="11"/>
+                        <TextBlock Text="{Binding GrantedPermissionsText}" Foreground="#34D399" FontSize="11" FontWeight="SemiBold"/>
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
