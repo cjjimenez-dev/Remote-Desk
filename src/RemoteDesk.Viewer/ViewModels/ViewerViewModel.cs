@@ -310,6 +310,35 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isLocalFleetActive;
 
+    // --- Unified Host Engine (Accepts incoming connections to This Desk) ---
+    private HostSessionServer? _hostServer;
+
+    [ObservableProperty]
+    private bool _isServingIncomingSession;
+
+    [ObservableProperty]
+    private string _incomingSessionText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isIncomingPromptVisible;
+
+    [ObservableProperty]
+    private string _incomingPromptText = string.Empty;
+
+    [ObservableProperty]
+    private string _signalingHostInput = "localhost";
+
+    [ObservableProperty]
+    private bool _autoAcceptIncoming = true;
+
+    partial void OnAutoAcceptIncomingChanged(bool value)
+    {
+        if (_hostServer != null)
+        {
+            _hostServer.AutoAcceptConnections = value;
+        }
+    }
+
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
@@ -1562,6 +1591,32 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             // Perform initial background update check now that the Fleet API server is ready
             await CheckForUpdatesAsync().ConfigureAwait(false);
+
+            // Initialize Background Host Engine to allow other computers to connect to This Desk
+            _hostServer = new HostSessionServer(LocalDeviceId, ViewerName, SignalingServerUrl, ForceRelay)
+            {
+                AutoAcceptConnections = AutoAcceptIncoming
+            };
+            _hostServer.StatusChanged += () =>
+            {
+                _dispatcher.Invoke(() =>
+                {
+                    IsServingIncomingSession = _hostServer.IsServingSession;
+                    if (IsServingIncomingSession)
+                    {
+                        IncomingSessionText = $"🔴 SHARING DESKTOP: Connected with {_hostServer.ActiveViewerName} (ID: {_hostServer.ActiveViewerDeviceId})";
+                    }
+                });
+            };
+            _hostServer.IncomingConnectionPrompt += (viewerName, viewerId) =>
+            {
+                _dispatcher.Invoke(() =>
+                {
+                    IncomingPromptText = $"Incoming connection request from {viewerName} (ID: {viewerId})";
+                    IsIncomingPromptVisible = true;
+                });
+            };
+            await _hostServer.StartAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1571,6 +1626,47 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 ServerStatusBadge = "⚠️ Server Startup Error";
                 ServerStatusColor = "#EF4444";
             });
+        }
+    }
+
+    [RelayCommand]
+    private async Task AcceptIncomingConnectionAsync()
+    {
+        IsIncomingPromptVisible = false;
+        if (_hostServer != null)
+        {
+            await _hostServer.AcceptIncomingConnectionAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task RejectIncomingConnectionAsync()
+    {
+        IsIncomingPromptVisible = false;
+        if (_hostServer != null)
+        {
+            await _hostServer.RejectIncomingConnectionAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void StopSharingDesktop()
+    {
+        _hostServer?.CloseSession();
+        IsServingIncomingSession = false;
+    }
+
+    [RelayCommand]
+    private async Task ApplySignalingServerChangeAsync()
+    {
+        var host = string.IsNullOrWhiteSpace(SignalingHostInput) ? "localhost" : SignalingHostInput.Trim();
+        SignalingServerUrl = $"http://{host}:5000/signaling";
+        FleetApiUrl = $"http://{host}:5001";
+        StatusText = $"Signaling target updated to: {SignalingServerUrl}";
+
+        if (_hostServer != null)
+        {
+            await _hostServer.StartAsync(SignalingServerUrl);
         }
     }
 
@@ -1599,6 +1695,13 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _updateManager.Dispose();
         _renderer.Dispose();
         _identity.Dispose();
+        if (_hostServer != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _hostServer.DisposeAsync().ConfigureAwait(false); } catch { }
+            });
+        }
         _ = Task.Run(async () =>
         {
             try { await _serverManager.DisposeAsync().ConfigureAwait(false); } catch { }

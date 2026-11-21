@@ -139,6 +139,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -159,10 +161,26 @@
                     </Border>
 
                     <!-- My Local Device ID Capsule -->
-                    <Border Background="#141418" BorderBrush="#22222C" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <Border Background="#141418" BorderBrush="#22222C" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,8,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="MY ID:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="0,0,6,0" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding LocalDeviceId}" FontFamily="Consolas, Cascadia Code" FontWeight="Bold" Foreground="#A78BFA" FontSize="12" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Server Host Input (For Connecting to Remote PC or Controller) -->
+                    <Border Background="#141418" BorderBrush="#262632" BorderThickness="1" CornerRadius="6" Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="Signaling Server Host (localhost or IP of the controller computer)">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="SERVER:" FontSize="10" FontWeight="Bold" Foreground="#71717A" Margin="4,0,4,0" VerticalAlignment="Center"/>
+                            <TextBox Text="{Binding SignalingHostInput, UpdateSourceTrigger=PropertyChanged}" 
+                                     Width="85" Height="24" VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                                     FontFamily="Consolas, Cascadia Code" FontSize="11"
+                                     Background="#09090B" Foreground="#38BDF8" BorderBrush="#2A2A36" BorderThickness="1" Padding="2,0">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding ApplySignalingServerChangeCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <Button Command="{Binding ApplySignalingServerChangeCommand}" Content="✓" Style="{StaticResource EmilHeaderButton}" Height="24" Padding="6,0" Margin="4,0,0,0" ToolTip="Apply server IP change"/>
                         </StackPanel>
                     </Border>
 
@@ -278,8 +296,38 @@
             </DockPanel>
         </Border>
 
+        <!-- Incoming Connection Prompt Banner (When someone requests to connect to This Desk) -->
+        <Border Grid.Row="1" Background="#0C2A4D" BorderBrush="#0284C7" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,8"
+                Visibility="{Binding IsIncomingPromptVisible, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding AcceptIncomingConnectionCommand}" 
+                            Content="✔ Accept Connection" Style="{StaticResource EmilConnectButton}" Height="28" Padding="12,0" Margin="0,0,8,0"/>
+                    <Button Command="{Binding RejectIncomingConnectionCommand}" 
+                            Content="✕ Reject" Style="{StaticResource EmilHeaderButton}" Background="#991B1B" BorderBrush="#EF4444" Foreground="White" Height="28" Padding="12,0"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="🔔 INCOMING DESKTOP ACCESS REQUEST: " FontWeight="Bold" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="{Binding IncomingPromptText}" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Active Incoming Session Banner (When This Desk is currently streaming to a remote partner) -->
+        <Border Grid.Row="2" Background="#3B0764" BorderBrush="#7E22CE" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,8"
+                Visibility="{Binding IsServingIncomingSession, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+            <DockPanel LastChildFill="True">
+                <Button DockPanel.Dock="Right" Command="{Binding StopSharingDesktopCommand}" 
+                        Content="⏹ Disconnect Remote User" Style="{StaticResource EmilHeaderButton}" Background="#DC2626" BorderBrush="#F87171" Foreground="White" Height="28" Padding="12,0"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding IncomingSessionText}" FontWeight="Bold" Foreground="#F0ABFC" VerticalAlignment="Center"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- Update Available Notification Banner (Emil Floating Pill Style) -->
-        <Border Grid.Row="1" Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,8"
+        <Border Grid.Row="3" Background="#064E3B" BorderBrush="#059669" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,8"
                 Visibility="{Binding IsUpdateAvailable, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -302,7 +350,7 @@
         </Border>
 
         <!-- File Transfer Progress Banner -->
-        <Border Grid.Row="2" Background="#1E1B4B" BorderBrush="#4338CA" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,6"
+        <Border Grid.Row="4" Background="#1E1B4B" BorderBrush="#4338CA" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,6"
                 Visibility="{Binding IsFileTransferActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
             <DockPanel LastChildFill="True">
                 <Button DockPanel.Dock="Right" Command="{Binding CancelFileTransferCommand}" 
@@ -316,7 +364,7 @@
         </Border>
 
         <!-- Emergency Kill Switch Alert Banner -->
-        <Border Grid.Row="3" Background="#450A0A" BorderBrush="#991B1B" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,6"
+        <Border Grid.Row="5" Background="#450A0A" BorderBrush="#991B1B" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,6"
                 Visibility="{Binding IsEmergencyKillTriggered, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
             <DockPanel LastChildFill="True">
                 <Button DockPanel.Dock="Right" Command="{Binding ResetEmergencyKillCommand}" 
@@ -329,7 +377,7 @@
         </Border>
 
         <!-- Video Display Canvas & Side Panels -->
-        <Grid Grid.Row="4" Background="#09090B" ClipToBounds="True">
+        <Grid Grid.Row="6" Background="#09090B" ClipToBounds="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -763,7 +811,7 @@
         </Grid>
 
         <!-- Bottom Status Bar -->
-        <Border Grid.Row="5" Background="#0C0C0F" Padding="14,6" BorderBrush="#1F1F26" BorderThickness="0,1,0,0">
+        <Border Grid.Row="7" Background="#0C0C0F" Padding="14,6" BorderBrush="#1F1F26" BorderThickness="0,1,0,0">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Background="#141418" BorderBrush="#22222A" BorderThickness="1" CornerRadius="4" Padding="8,2" Margin="0,0,10,0">
