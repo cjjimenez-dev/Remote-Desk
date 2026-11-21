@@ -4,7 +4,11 @@ using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
 using RemoteDesk.Core.Security;
+using RemoteDesk.Core.Quality;
+using RemoteDesk.Core.Services;
 using RemoteDesk.Platform.Windows;
+using RemoteDesk.Platform.Windows.Audio;
+using RemoteDesk.Platform.Windows.Clipboard;
 using RemoteDesk.Platform.Windows.Ipc;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Platform.Windows.Session;
@@ -75,6 +79,11 @@ IVideoEncoder? encoder = null;
 IInputInjector? injector = null;
 EmergencyKillSwitch? killSwitch = null;
 SessionBannerService? sessionBanner = null;
+WindowsClipboardService? clipboardService = null;
+FileTransferService? fileTransferService = null;
+WasapiAudioCapturer? audioCapturer = null;
+AdaptiveQualityController? qualityController = null;
+ChatService? chatService = null;
 
 var sessionLock = new object();
 string? activeSessionId = null;
@@ -91,6 +100,20 @@ void StopActiveSession()
             sessionBanner?.CloseBanner();
             sessionBanner?.Dispose();
             sessionBanner = null;
+
+            clipboardService?.StopMonitoring();
+            clipboardService?.Dispose();
+            clipboardService = null;
+
+            fileTransferService?.Dispose();
+            fileTransferService = null;
+
+            audioCapturer?.Stop();
+            audioCapturer?.Dispose();
+            audioCapturer = null;
+
+            chatService?.Dispose();
+            chatService = null;
 
             capturer?.Stop();
             capturer?.Dispose();
@@ -271,6 +294,96 @@ else
                     finally { frame.Dispose(); }
                 };
                 capturer.Start(30);
+
+                // --- Phase 7 Features ---
+                // 1. Clipboard Synchronization
+                if (activePermissions.HasFlag(SessionPermissions.Clipboard))
+                {
+                    clipboardService = new WindowsClipboardService();
+                    long clipSeq = 0;
+                    clipboardService.RemoteClipboardChanged += clipData =>
+                    {
+                        if (currentTransport == null) return;
+                        if (clipData.Format == ClipboardFormat.Text && clipData.Text != null)
+                        {
+                            var msg = new ClipboardTextMessage
+                            {
+                                Text = clipData.Text,
+                                ContentHash = WindowsClipboardService.ComputeHash(clipData),
+                                SequenceNumber = Interlocked.Increment(ref clipSeq)
+                            };
+                            var env = new ProtocolEnvelope(DataChannels.Clipboard, MessageType.ClipboardText, ProtocolSerializer.Serialize(msg));
+                            _ = currentTransport.SendMessageAsync(DataChannels.Clipboard, env.ToBytes(), reliable: true);
+                        }
+                        else if (clipData.Format == ClipboardFormat.ImagePng && clipData.Data.Length > 0)
+                        {
+                            var msg = new ClipboardImageMessage
+                            {
+                                ImageData = clipData.Data,
+                                Format = "image/png",
+                                ContentHash = WindowsClipboardService.ComputeHash(clipData)
+                            };
+                            var env = new ProtocolEnvelope(DataChannels.Clipboard, MessageType.ClipboardImage, ProtocolSerializer.Serialize(msg));
+                            _ = currentTransport.SendMessageAsync(DataChannels.Clipboard, env.ToBytes(), reliable: true);
+                        }
+                    };
+                    clipboardService.StartMonitoring();
+                }
+
+                // 2. Chunked File Transfer Service
+                if (activePermissions.HasFlag(SessionPermissions.Files))
+                {
+                    fileTransferService = new FileTransferService(currentTransport);
+                }
+
+                // 3. Audio Streaming via WASAPI Loopback
+                if (activePermissions.HasFlag(SessionPermissions.Audio))
+                {
+                    try
+                    {
+                        audioCapturer = new WasapiAudioCapturer();
+                        long audioSeq = 0;
+                        audioCapturer.AudioSampleCaptured += sample =>
+                        {
+                            if (currentTransport == null) return;
+                            var audioMsg = new AudioPacketMessage
+                            {
+                                SequenceNumber = Interlocked.Increment(ref audioSeq),
+                                TimestampMs = Stopwatch.GetTimestamp(),
+                                SampleRate = audioCapturer.WaveFormat?.SampleRate ?? 48000,
+                                Channels = audioCapturer.WaveFormat?.Channels ?? 2,
+                                AudioData = sample.ToArray()
+                            };
+                            var env = new ProtocolEnvelope(DataChannels.Audio, MessageType.AudioPacket, ProtocolSerializer.Serialize(audioMsg));
+                            _ = currentTransport.SendMessageAsync(DataChannels.Audio, env.ToBytes(), reliable: false);
+                        };
+                        audioCapturer.Start();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Failed to start audio capturer on host.");
+                    }
+                }
+
+                // 4. In-Session Chat
+                chatService = new ChatService(currentTransport, hostId, Environment.MachineName);
+
+                // 5. Multi-Monitor Announcement
+                var displays = capturer.GetDisplays();
+                var displayListMsg = new DisplayListMessage
+                {
+                    Displays = displays.ToList(),
+                    ActiveDisplayId = capturer.CurrentDisplay?.Id ?? -1
+                };
+                var dispEnv = new ProtocolEnvelope(DataChannels.Control, MessageType.DisplayList, ProtocolSerializer.Serialize(displayListMsg));
+                _ = currentTransport.SendMessageAsync(DataChannels.Control, dispEnv.ToBytes(), reliable: true);
+
+                // 6. Adaptive Quality & Congestion Control
+                qualityController = new AdaptiveQualityController(QualityPreset.Balanced);
+                qualityController.QualitySettingsChanged += update =>
+                {
+                    encoder?.SetBitrate(update.TargetBitrateKbps);
+                };
             }
             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
             {
@@ -280,7 +393,9 @@ else
 
         currentTransport.MessageReceived += (channel, data) =>
         {
-            if (channel == DataChannels.Input && injector != null && ProtocolEnvelope.TryDecode(data.Span, out var env, out _))
+            if (!ProtocolEnvelope.TryDecode(data.Span, out var env, out _)) return;
+
+            if (channel == DataChannels.Input && injector != null)
             {
                 if (env.MessageType == MessageType.MouseMove)
                 {
@@ -296,6 +411,42 @@ else
                 {
                     var k = ProtocolSerializer.Deserialize<KeyMessage>(env.Payload);
                     injector.InjectKey(k.ScanCode, k.IsExtended, k.State);
+                }
+            }
+            else if (channel == DataChannels.Clipboard && clipboardService != null)
+            {
+                if (env.MessageType == MessageType.ClipboardText)
+                {
+                    var txt = ProtocolSerializer.Deserialize<ClipboardTextMessage>(env.Payload);
+                    _ = clipboardService.SetClipboardAsync(new ClipboardData(ClipboardFormat.Text, System.Text.Encoding.UTF8.GetBytes(txt.Text), txt.Text));
+                }
+                else if (env.MessageType == MessageType.ClipboardImage)
+                {
+                    var img = ProtocolSerializer.Deserialize<ClipboardImageMessage>(env.Payload);
+                    _ = clipboardService.SetClipboardAsync(new ClipboardData(ClipboardFormat.ImagePng, img.ImageData));
+                }
+            }
+            else if (channel == DataChannels.Control)
+            {
+                if (env.MessageType == MessageType.SwitchDisplay)
+                {
+                    var switchMsg = ProtocolSerializer.Deserialize<SwitchDisplayMessage>(env.Payload);
+                    Log.Information("Viewer requested switch to Display [{DisplayId}]", switchMsg.TargetDisplayId);
+                    capturer?.SetTargetDisplay(switchMsg.TargetDisplayId);
+                    if (capturer?.CurrentDisplay != null && injector != null)
+                    {
+                        injector.SetTargetDisplay(capturer.CurrentDisplay);
+                    }
+                }
+                else if (env.MessageType == MessageType.QualityMetricsReport && qualityController != null)
+                {
+                    var metrics = ProtocolSerializer.Deserialize<QualityMetricsReportMessage>(env.Payload);
+                    qualityController.ProcessMetrics(metrics);
+                }
+                else if (env.MessageType == MessageType.QualitySettingsUpdate && qualityController != null)
+                {
+                    var settings = ProtocolSerializer.Deserialize<QualitySettingsUpdateMessage>(env.Payload);
+                    qualityController.ApplyPreset(settings.Preset);
                 }
             }
         };

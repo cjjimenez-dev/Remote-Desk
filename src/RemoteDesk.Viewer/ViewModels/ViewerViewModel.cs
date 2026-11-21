@@ -8,7 +8,11 @@ using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
 using RemoteDesk.Core.Security;
+using RemoteDesk.Core.Quality;
+using RemoteDesk.Core.Services;
 using RemoteDesk.Platform.Windows;
+using RemoteDesk.Platform.Windows.Audio;
+using RemoteDesk.Platform.Windows.Clipboard;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Transport.WebRtc;
 using RemoteDesk.Viewer.Rendering;
@@ -130,12 +134,106 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     public IInputInjector? Injector => _injector;
 
+    // --- Phase 7 Core Features ---
+    private WindowsClipboardService? _clipboardService;
+    private FileTransferService? _fileTransferService;
+    private WasapiAudioPlayer? _audioPlayer;
+    private ChatService? _chatService;
+    private readonly AddressBookService _addressBookService;
+
+    // File Transfer
+    [ObservableProperty]
+    private bool _isFileTransferActive;
+
+    [ObservableProperty]
+    private string _fileTransferStatusText = string.Empty;
+
+    [ObservableProperty]
+    private double _fileTransferProgressPercent;
+
+    [ObservableProperty]
+    private string? _activeFileTransferId;
+
+    // Audio
+    [ObservableProperty]
+    private bool _isAudioMuted;
+
+    public string AudioButtonText => IsAudioMuted ? "🔇 Muted" : "🔊 Audio";
+
+    partial void OnIsAudioMutedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(AudioButtonText));
+    }
+
+    [ObservableProperty]
+    private float _audioVolume = 1.0f;
+
+    // Multi-Monitor
+    public ObservableCollection<DisplayInfo> RemoteDisplays { get; } = [];
+
+    [ObservableProperty]
+    private DisplayInfo? _selectedRemoteDisplay;
+
+    partial void OnSelectedRemoteDisplayChanged(DisplayInfo? value)
+    {
+        if (value != null && IsRemoteSessionActive)
+        {
+            _ = SwitchRemoteDisplayAsync(value);
+        }
+    }
+
+    // Adaptive Quality Presets
+    public ObservableCollection<QualityPreset> AvailableQualityPresets { get; } = [
+        QualityPreset.Speed,
+        QualityPreset.Balanced,
+        QualityPreset.Quality
+    ];
+
+    [ObservableProperty]
+    private QualityPreset _selectedQualityPreset = QualityPreset.Balanced;
+
+    partial void OnSelectedQualityPresetChanged(QualityPreset value)
+    {
+        if (IsRemoteSessionActive)
+        {
+            _ = ChangeQualityPresetAsync(value);
+        }
+    }
+
+    // Chat
+    public ObservableCollection<SessionChatMessage> ChatMessages { get; } = [];
+
+    [ObservableProperty]
+    private string _chatInputText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isChatPaneOpen;
+
+    [ObservableProperty]
+    private int _unreadChatCount;
+
+    public string UnreadChatBadgeText => UnreadChatCount > 0 ? $" ({UnreadChatCount})" : string.Empty;
+
+    partial void OnUnreadChatCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(UnreadChatBadgeText));
+    }
+
+    // Address Book
+    public ObservableCollection<AddressBookEntry> AddressBookEntries { get; } = [];
+
+    [ObservableProperty]
+    private bool _isAddressBookOpen;
+
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
+        _addressBookService = new AddressBookService();
         var keyStore = new DpapiDeviceKeyStore();
         _identity = new DeviceIdentity(keyStore);
         LocalDeviceId = _identity.DeviceId;
+
+        _ = LoadAddressBookAsync();
 
         _renderer = new WriteableBitmapVideoRenderer(dispatcher);
         _renderer.FrameRendered += () =>
@@ -306,6 +404,99 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                                 IsInputEnabled = _grantedPermissions.HasFlag(SessionPermissions.Control);
                                 StatusText = $"Connected to [{TargetHostId}] via WebRTC ({ConnectionPathBadge})";
                                 _statsTimer.Start();
+
+                                // 1. Record connection in Address Book
+                                _ = _addressBookService.RecordConnectionAsync(TargetHostId);
+
+                                // 2. Clipboard Sync
+                                if (_grantedPermissions.HasFlag(SessionPermissions.Clipboard))
+                                {
+                                    _clipboardService = new WindowsClipboardService();
+                                    long clipSeq = 0;
+                                    _clipboardService.RemoteClipboardChanged += clipData =>
+                                    {
+                                        if (_transport == null) return;
+                                        if (clipData.Format == ClipboardFormat.Text && clipData.Text != null)
+                                        {
+                                            var msg = new ClipboardTextMessage
+                                            {
+                                                Text = clipData.Text,
+                                                ContentHash = WindowsClipboardService.ComputeHash(clipData),
+                                                SequenceNumber = Interlocked.Increment(ref clipSeq)
+                                            };
+                                            var env = new ProtocolEnvelope(DataChannels.Clipboard, MessageType.ClipboardText, ProtocolSerializer.Serialize(msg));
+                                            _ = _transport.SendMessageAsync(DataChannels.Clipboard, env.ToBytes(), reliable: true);
+                                        }
+                                        else if (clipData.Format == ClipboardFormat.ImagePng && clipData.Data.Length > 0)
+                                        {
+                                            var msg = new ClipboardImageMessage
+                                            {
+                                                ImageData = clipData.Data,
+                                                Format = "image/png",
+                                                ContentHash = WindowsClipboardService.ComputeHash(clipData)
+                                            };
+                                            var env = new ProtocolEnvelope(DataChannels.Clipboard, MessageType.ClipboardImage, ProtocolSerializer.Serialize(msg));
+                                            _ = _transport.SendMessageAsync(DataChannels.Clipboard, env.ToBytes(), reliable: true);
+                                        }
+                                    };
+                                    _clipboardService.StartMonitoring();
+                                }
+
+                                // 3. File Transfer Service
+                                if (_grantedPermissions.HasFlag(SessionPermissions.Files))
+                                {
+                                    _fileTransferService = new FileTransferService(_transport);
+                                    _fileTransferService.ProgressUpdated += progress =>
+                                    {
+                                        _dispatcher.Invoke(() =>
+                                        {
+                                            if (progress.IsCompleted)
+                                            {
+                                                IsFileTransferActive = false;
+                                                FileTransferStatusText = $"Transfer complete: {progress.FileName}";
+                                                FileTransferProgressPercent = 100;
+                                            }
+                                            else if (!string.IsNullOrEmpty(progress.ErrorMessage))
+                                            {
+                                                IsFileTransferActive = false;
+                                                FileTransferStatusText = $"Transfer error: {progress.ErrorMessage}";
+                                            }
+                                            else
+                                            {
+                                                IsFileTransferActive = true;
+                                                ActiveFileTransferId = progress.TransferId;
+                                                double percent = progress.TotalBytes > 0 ? (progress.BytesTransferred * 100.0) / progress.TotalBytes : 0;
+                                                FileTransferProgressPercent = percent;
+                                                double speedMb = progress.SpeedBytesPerSecond / (1024 * 1024);
+                                                FileTransferStatusText = $"{progress.FileName}: {percent:F1}% ({speedMb:F1} MB/s)";
+                                            }
+                                        });
+                                    };
+                                }
+
+                                // 4. Audio Playback
+                                if (_grantedPermissions.HasFlag(SessionPermissions.Audio))
+                                {
+                                    _audioPlayer = new WasapiAudioPlayer
+                                    {
+                                        Volume = AudioVolume,
+                                        IsMuted = IsAudioMuted
+                                    };
+                                }
+
+                                // 5. In-Session Chat
+                                _chatService = new ChatService(_transport, _identity.DeviceId, ViewerName);
+                                _chatService.MessageReceived += msg =>
+                                {
+                                    _dispatcher.Invoke(() =>
+                                    {
+                                        ChatMessages.Add(msg);
+                                        if (!IsChatPaneOpen)
+                                        {
+                                            UnreadChatCount++;
+                                        }
+                                    });
+                                };
                             }
                             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
                             {
@@ -313,6 +504,52 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                                 DisconnectRemote();
                             }
                         });
+                    };
+
+                    _transport.MessageReceived += (channel, data) =>
+                    {
+                        if (!ProtocolEnvelope.TryDecode(data.Span, out var env, out _)) return;
+
+                        if (channel == DataChannels.Clipboard && _clipboardService != null)
+                        {
+                            if (env.MessageType == MessageType.ClipboardText)
+                            {
+                                var txt = ProtocolSerializer.Deserialize<ClipboardTextMessage>(env.Payload);
+                                _ = _clipboardService.SetClipboardAsync(new ClipboardData(ClipboardFormat.Text, System.Text.Encoding.UTF8.GetBytes(txt.Text), txt.Text));
+                            }
+                            else if (env.MessageType == MessageType.ClipboardImage)
+                            {
+                                var img = ProtocolSerializer.Deserialize<ClipboardImageMessage>(env.Payload);
+                                _ = _clipboardService.SetClipboardAsync(new ClipboardData(ClipboardFormat.ImagePng, img.ImageData));
+                            }
+                        }
+                        else if (channel == DataChannels.Audio && _audioPlayer != null)
+                        {
+                            if (env.MessageType == MessageType.AudioPacket)
+                            {
+                                var packet = ProtocolSerializer.Deserialize<AudioPacketMessage>(env.Payload);
+                                _audioPlayer.PlaySample(packet.AudioData, packet.SampleRate, packet.Channels);
+                            }
+                        }
+                        else if (channel == DataChannels.Control)
+                        {
+                            if (env.MessageType == MessageType.DisplayList)
+                            {
+                                var list = ProtocolSerializer.Deserialize<DisplayListMessage>(env.Payload);
+                                _dispatcher.Invoke(() =>
+                                {
+                                    RemoteDisplays.Clear();
+                                    foreach (var d in list.Displays)
+                                    {
+                                        RemoteDisplays.Add(d);
+                                    }
+                                    if (RemoteDisplays.Count > 0)
+                                    {
+                                        SelectedRemoteDisplay = RemoteDisplays.FirstOrDefault(d => d.Id == list.ActiveDisplayId) ?? RemoteDisplays[0];
+                                    }
+                                });
+                            }
+                        }
                     };
 
                     _transport.VideoPacketReceived += packet =>
@@ -456,6 +693,26 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         SecurityStatusBadge = "🔒 Disconnected";
         SecurityStatusColor = "#6B7280";
         StatusText = "Disconnected.";
+
+        _clipboardService?.StopMonitoring();
+        _clipboardService?.Dispose();
+        _clipboardService = null;
+
+        _fileTransferService?.Dispose();
+        _fileTransferService = null;
+
+        _audioPlayer?.Dispose();
+        _audioPlayer = null;
+
+        _chatService?.Dispose();
+        _chatService = null;
+
+        _dispatcher.Invoke(() =>
+        {
+            RemoteDisplays.Clear();
+            SelectedRemoteDisplay = null;
+            IsFileTransferActive = false;
+        });
     }
 
     private void OnRemoteVideoPacketReceived(ReadOnlyMemory<byte> packet)
@@ -718,6 +975,205 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         {
             ResolutionText = $"{_renderer.BitmapSource.PixelWidth} x {_renderer.BitmapSource.PixelHeight}";
         }
+
+        // Send adaptive quality metrics report to Host
+        if (IsRemoteSessionActive && _transport != null)
+        {
+            var report = new QualityMetricsReportMessage
+            {
+                RttMs = 25.0,
+                PacketLossPercent = 0.0,
+                CurrentFps = fps,
+                CurrentBitrateKbps = (int)bitrateKbps,
+                DecodeLatencyMs = avgDec
+            };
+            var env = new ProtocolEnvelope(DataChannels.Control, MessageType.QualityMetricsReport, ProtocolSerializer.Serialize(report));
+            _ = _transport.SendMessageAsync(DataChannels.Control, env.ToBytes(), reliable: false);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SendFilePromptAsync()
+    {
+        if (_fileTransferService == null || !IsRemoteSessionActive) return;
+
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select File to Send to Remote Host"
+        };
+
+        if (dlg.ShowDialog() == true)
+        {
+            try
+            {
+                IsFileTransferActive = true;
+                FileTransferStatusText = $"Initiating transfer for {System.IO.Path.GetFileName(dlg.FileName)}...";
+                ActiveFileTransferId = await _fileTransferService.SendFileAsync(dlg.FileName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to initiate file transfer.");
+                FileTransferStatusText = $"Error: {ex.Message}";
+                IsFileTransferActive = false;
+            }
+        }
+    }
+
+    [RelayCommand]
+    private async Task CancelFileTransferAsync()
+    {
+        if (_fileTransferService != null && !string.IsNullOrEmpty(ActiveFileTransferId))
+        {
+            await _fileTransferService.CancelTransferAsync(ActiveFileTransferId);
+            IsFileTransferActive = false;
+            FileTransferStatusText = "Transfer cancelled.";
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleAudioMute()
+    {
+        IsAudioMuted = !IsAudioMuted;
+        if (_audioPlayer != null)
+        {
+            _audioPlayer.IsMuted = IsAudioMuted;
+        }
+    }
+
+    partial void OnAudioVolumeChanged(float value)
+    {
+        if (_audioPlayer != null)
+        {
+            _audioPlayer.Volume = value;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SwitchRemoteDisplayAsync(DisplayInfo? display)
+    {
+        if (display == null || _transport == null || !IsRemoteSessionActive) return;
+
+        SelectedRemoteDisplay = display;
+        var msg = new SwitchDisplayMessage
+        {
+            TargetDisplayId = display.Id
+        };
+        var env = new ProtocolEnvelope(DataChannels.Control, MessageType.SwitchDisplay, ProtocolSerializer.Serialize(msg));
+        await _transport.SendMessageAsync(DataChannels.Control, env.ToBytes(), reliable: true);
+        Logger.Information("Requested remote host switch to Display [{Id}] ({Name})", display.Id, display.DeviceName);
+    }
+
+    [RelayCommand]
+    private async Task ChangeQualityPresetAsync(QualityPreset preset)
+    {
+        SelectedQualityPreset = preset;
+        if (_transport != null && IsRemoteSessionActive)
+        {
+            var msg = new QualitySettingsUpdateMessage
+            {
+                Preset = preset
+            };
+            var env = new ProtocolEnvelope(DataChannels.Control, MessageType.QualitySettingsUpdate, ProtocolSerializer.Serialize(msg));
+            await _transport.SendMessageAsync(DataChannels.Control, env.ToBytes(), reliable: true);
+            Logger.Information("Sent quality preset update: {Preset}", preset);
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleChatPane()
+    {
+        IsChatPaneOpen = !IsChatPaneOpen;
+        if (IsChatPaneOpen)
+        {
+            UnreadChatCount = 0;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SendChatMessageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ChatInputText) || _chatService == null || !IsRemoteSessionActive) return;
+
+        var text = ChatInputText.Trim();
+        ChatInputText = string.Empty;
+
+        try
+        {
+            var sent = await _chatService.SendMessageAsync(text);
+            ChatMessages.Add(sent);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to send chat message.");
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleAddressBook()
+    {
+        IsAddressBookOpen = !IsAddressBookOpen;
+        if (IsAddressBookOpen)
+        {
+            _ = LoadAddressBookAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadAddressBookAsync()
+    {
+        try
+        {
+            var entries = await _addressBookService.GetAllEntriesAsync();
+            _dispatcher.Invoke(() =>
+            {
+                AddressBookEntries.Clear();
+                foreach (var entry in entries)
+                {
+                    AddressBookEntries.Add(entry);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to load address book.");
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveCurrentHostToAddressBookAsync()
+    {
+        if (string.IsNullOrWhiteSpace(TargetHostId)) return;
+
+        var entry = new AddressBookEntry
+        {
+            DeviceId = TargetHostId,
+            Alias = $"Host {TargetHostId}",
+            LastConnectedUtc = DateTime.UtcNow
+        };
+
+        await _addressBookService.UpsertEntryAsync(entry);
+        await LoadAddressBookAsync();
+    }
+
+    [RelayCommand]
+    private async Task ToggleFavoriteAddressBookAsync(string deviceId)
+    {
+        await _addressBookService.ToggleFavoriteAsync(deviceId);
+        await LoadAddressBookAsync();
+    }
+
+    [RelayCommand]
+    private async Task DeleteAddressBookEntryAsync(string deviceId)
+    {
+        await _addressBookService.DeleteEntryAsync(deviceId);
+        await LoadAddressBookAsync();
+    }
+
+    [RelayCommand]
+    private void SelectAddressBookEntry(AddressBookEntry entry)
+    {
+        TargetHostId = entry.DeviceId;
+        IsAddressBookOpen = false;
     }
 
     private void StopLoopback()
