@@ -9,6 +9,7 @@ using RemoteDesk.Core.Services;
 using RemoteDesk.Platform.Windows;
 using RemoteDesk.Platform.Windows.Audio;
 using RemoteDesk.Platform.Windows.Clipboard;
+using RemoteDesk.Platform.Windows.Fleet;
 using RemoteDesk.Platform.Windows.Ipc;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Platform.Windows.Session;
@@ -25,6 +26,7 @@ var pipeName = "RemoteDesk_Service_Agent_Ipc";
 var isServiceManaged = false;
 var isSecureDesktop = false;
 var serverUrl = "http://localhost:5000/signaling";
+var fleetUrl = "http://localhost:5001";
 var hostId = string.Empty;
 var forceRelay = false;
 
@@ -43,6 +45,10 @@ for (var i = 0; i < args.Length; i++)
     else if (args[i] == "--server" && i + 1 < args.Length)
     {
         serverUrl = args[++i];
+    }
+    else if (args[i] == "--fleet-url" && i + 1 < args.Length)
+    {
+        fleetUrl = args[++i];
     }
     else if (args[i] == "--id" && i + 1 < args.Length)
     {
@@ -544,6 +550,49 @@ else
     await signaling.RegisterHostAsync(hostId, Environment.MachineName, identity.PublicKeyBytes, cts.Token);
     Log.Information("Host.Agent registered with ID [{HostId}]. Waiting for connections...", hostId);
 
+    // Register with Fleet API and start Heartbeat/Command polling loop
+    using var fleetClient = new FleetClientService(fleetUrl);
+    var telemetry = WindowsSystemTelemetry.CollectDeviceRecord(hostId, identity.PublicKeyBytes);
+    await fleetClient.RegisterDeviceAsync(telemetry, cts.Token);
+    Log.Information("Host.Agent registered with Fleet API at [{FleetUrl}]", fleetUrl);
+
+    var fleetTask = Task.Run(async () =>
+    {
+        while (!cts.Token.IsCancellationRequested)
+        {
+            try
+            {
+                var status = activeSessionId != null ? DeviceStatus.InSession : DeviceStatus.Online;
+                await fleetClient.SendHeartbeatAsync(hostId, status, activeSessionId, cts.Token);
+
+                var pending = await fleetClient.GetPendingCommandsAsync(hostId, cts.Token);
+                foreach (var cmd in pending)
+                {
+                    Log.Information("Received Fleet Command [{CmdId}] type {Type}", cmd.CommandId, cmd.CommandType);
+                    var (resStatus, output) = await WindowsFleetCommandHandler.ExecuteCommandAsync(cmd);
+                    await fleetClient.ReportCommandResultAsync(cmd.CommandId, resStatus, output, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Fleet poll loop error");
+            }
+
+            try
+            {
+                await Task.Delay(10000, cts.Token);
+            }
+            catch (OperationCanceledException) { break; }
+        }
+
+        try
+        {
+            await fleetClient.SendHeartbeatAsync(hostId, DeviceStatus.Offline);
+        }
+        catch { }
+    });
+
     try
     {
         await Task.Delay(Timeout.Infinite, cts.Token);
@@ -556,6 +605,7 @@ else
     {
         StopActiveSession();
         await signaling.DisposeAsync();
+        try { await fleetTask; } catch { }
     }
 }
 

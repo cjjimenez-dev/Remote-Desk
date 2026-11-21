@@ -5,6 +5,7 @@
     <Project Path="src/RemoteDesk.Host.Agent/RemoteDesk.Host.Agent.csproj" />
     <Project Path="src/RemoteDesk.Host.Service/RemoteDesk.Host.Service.csproj" />
     <Project Path="src/RemoteDesk.Platform.Windows/RemoteDesk.Platform.Windows.csproj" />
+    <Project Path="src/RemoteDesk.Server.Api/RemoteDesk.Server.Api.csproj" />
     <Project Path="src/RemoteDesk.Server.Signaling/RemoteDesk.Server.Signaling.csproj" />
     <Project Path="src/RemoteDesk.Transport.WebRtc/RemoteDesk.Transport.WebRtc.csproj" />
     <Project Path="src/RemoteDesk.Viewer/RemoteDesk.Viewer.csproj" />

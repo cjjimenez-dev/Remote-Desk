@@ -247,10 +247,35 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<ShellType> AvailableShells { get; } = [ShellType.PowerShell, ShellType.Cmd];
 
+    // --- Phase 9 Fleet Dashboard ---
+    private FleetClientService? _fleetClientService;
+
+    [ObservableProperty]
+    private bool _isFleetDashboardOpen;
+
+    [ObservableProperty]
+    private string _fleetApiUrl = "http://localhost:5001";
+
+    [ObservableProperty]
+    private FleetSummary _fleetSummary = new();
+
+    [ObservableProperty]
+    private string _fleetSearchQuery = string.Empty;
+
+    [ObservableProperty]
+    private string _selectedFleetStatusFilter = "All";
+
+    public ObservableCollection<DeviceRecord> FleetDevices { get; } = [];
+    public ObservableCollection<FleetAuditRecord> FleetAuditLogs { get; } = [];
+
+    [ObservableProperty]
+    private DeviceRecord? _selectedFleetDevice;
+
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
         _addressBookService = new AddressBookService();
+        _fleetClientService = new FleetClientService(FleetApiUrl);
         var keyStore = new DpapiDeviceKeyStore();
         _identity = new DeviceIdentity(keyStore);
         LocalDeviceId = _identity.DeviceId;
@@ -1292,6 +1317,93 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         TerminalOutputText = string.Empty;
     }
 
+    // --- Fleet Dashboard Commands ---
+    [RelayCommand]
+    private void ToggleFleetDashboard()
+    {
+        IsFleetDashboardOpen = !IsFleetDashboardOpen;
+        if (IsFleetDashboardOpen)
+        {
+            _ = RefreshFleetDataAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshFleetDataAsync()
+    {
+        if (_fleetClientService == null) return;
+
+        try
+        {
+            var summary = await _fleetClientService.GetFleetSummaryAsync();
+            var devices = await _fleetClientService.GetDevicesAsync(search: FleetSearchQuery);
+            var logs = await _fleetClientService.GetAuditLogsAsync(limit: 20);
+
+            _dispatcher.Invoke(() =>
+            {
+                FleetSummary = summary;
+                FleetDevices.Clear();
+                foreach (var d in devices)
+                {
+                    if (SelectedFleetStatusFilter == "Online" && d.Status != DeviceStatus.Online) continue;
+                    if (SelectedFleetStatusFilter == "InSession" && d.Status != DeviceStatus.InSession) continue;
+                    if (SelectedFleetStatusFilter == "Offline" && d.Status != DeviceStatus.Offline) continue;
+                    FleetDevices.Add(d);
+                }
+
+                FleetAuditLogs.Clear();
+                foreach (var l in logs)
+                {
+                    FleetAuditLogs.Add(l);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to refresh fleet dashboard data.");
+        }
+    }
+
+    [RelayCommand]
+    private void ConnectToFleetDevice(DeviceRecord device)
+    {
+        TargetHostId = device.DeviceId;
+        IsFleetDashboardOpen = false;
+        ConnectRemoteCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private void LaunchFleetDeviceTerminal(DeviceRecord device)
+    {
+        TargetHostId = device.DeviceId;
+        IsFleetDashboardOpen = false;
+        IsTerminalOpen = true;
+        ConnectRemoteCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private async Task SendFleetLockCommandAsync(DeviceRecord device)
+    {
+        if (_fleetClientService == null) return;
+        await _fleetClientService.QueueCommandAsync(device.DeviceId, FleetCommandType.LockWorkstation);
+        await RefreshFleetDataAsync();
+    }
+
+    [RelayCommand]
+    private async Task SendFleetRebootCommandAsync(DeviceRecord device)
+    {
+        if (_fleetClientService == null) return;
+        await _fleetClientService.QueueCommandAsync(device.DeviceId, FleetCommandType.Reboot);
+        await RefreshFleetDataAsync();
+    }
+
+    [RelayCommand]
+    private void SetFleetFilter(string filter)
+    {
+        SelectedFleetStatusFilter = filter;
+        _ = RefreshFleetDataAsync();
+    }
+
     private void StopLoopback()
     {
         _statsTimer.Stop();
@@ -1327,6 +1439,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     {
         DisconnectRemote();
         StopLoopback();
+        _fleetClientService?.Dispose();
         _renderer.Dispose();
         _identity.Dispose();
     }

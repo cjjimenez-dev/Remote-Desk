@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 8 Remote Terminal"
+        Title="RemoteDesk Viewer - Phase 9 Fleet Dashboard"
         Height="850" Width="1350"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
@@ -30,7 +30,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,12,0" VerticalAlignment="Center">
-                        <TextBlock Text="Phase 8: Remote Terminal" FontSize="11" Foreground="#9CA3AF"/>
+                        <TextBlock Text="Phase 9: Fleet Dashboard" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
 
                     <!-- My Local Device ID Display -->
@@ -69,7 +69,12 @@
                     <!-- Address Book Quick Button -->
                     <Button Command="{Binding ToggleAddressBookCommand}" 
                             Content="📖 Saved PCs" Height="28" Padding="8,2" FontWeight="SemiBold"
-                            Background="#374151" Foreground="#E5E7EB" BorderThickness="0" Cursor="Hand" Margin="0,0,10,0"/>
+                            Background="#374151" Foreground="#E5E7EB" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+
+                    <!-- Fleet Dashboard Button -->
+                    <Button Command="{Binding ToggleFleetDashboardCommand}" 
+                            Content="🏢 Fleet" Height="28" Padding="8,2" FontWeight="SemiBold"
+                            Background="#0284C7" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,10,0"/>
 
                     <!-- Force TURN Relay Mode Checkbox -->
                     <CheckBox IsChecked="{Binding ForceRelay}" Content="Force Relay" 
@@ -431,6 +436,144 @@
                             <Button DockPanel.Dock="Right" Command="{Binding SaveCurrentHostToAddressBookCommand}" 
                                     Content="+ Save Current Host ID" Background="#2563EB" Foreground="White" FontWeight="Bold" Padding="12,6" BorderThickness="0" Cursor="Hand"/>
                             <TextBlock Text="{Binding AddressBookEntries.Count, StringFormat='Total saved: {0}'}" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Grid>
+                </Border>
+            </Border>
+
+            <!-- Fleet Dashboard Overlay Drawer -->
+            <Border Grid.ColumnSpan="2" Background="#E0000000" 
+                    Visibility="{Binding IsFleetDashboardOpen, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <Border Width="980" Height="640" Background="#1E293B" BorderBrush="#475569" BorderThickness="1" CornerRadius="8" Padding="16">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Command="{Binding ToggleFleetDashboardCommand}" 
+                                    Content="✕" Background="Transparent" Foreground="#94A3B8" BorderThickness="0" FontWeight="Bold" FontSize="14" Cursor="Hand"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🏢 Fleet Management &amp; Inventory" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <Border Background="#0284C7" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                    <TextBlock Text="Live Inventory" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                </Border>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Metric Summary Cards -->
+                        <Grid Grid.Row="1" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="Total Hosts" FontSize="11" Foreground="#94A3B8"/>
+                                    <TextBlock Text="{Binding FleetSummary.TotalDevices}" FontSize="20" FontWeight="Bold" Foreground="White" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="🟢 Online" FontSize="11" Foreground="#34D399"/>
+                                    <TextBlock Text="{Binding FleetSummary.OnlineDevices}" FontSize="20" FontWeight="Bold" Foreground="#34D399" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="🔵 In Session" FontSize="11" Foreground="#60A5FA"/>
+                                    <TextBlock Text="{Binding FleetSummary.InSessionDevices}" FontSize="20" FontWeight="Bold" Foreground="#60A5FA" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="3" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,8">
+                                <StackPanel>
+                                    <TextBlock Text="⚪ Offline" FontSize="11" Foreground="#94A3B8"/>
+                                    <TextBlock Text="{Binding FleetSummary.OfflineDevices}" FontSize="20" FontWeight="Bold" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Search & Filter Controls -->
+                        <Border Grid.Row="2" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,10">
+                            <DockPanel LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Command="{Binding SetFleetFilterCommand}" CommandParameter="All" 
+                                            Content="All" Padding="8,3" FontSize="11" FontWeight="Bold" Background="#334155" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                    <Button Command="{Binding SetFleetFilterCommand}" CommandParameter="Online" 
+                                            Content="Online" Padding="8,3" FontSize="11" FontWeight="Bold" Background="#065F46" Foreground="#34D399" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                    <Button Command="{Binding SetFleetFilterCommand}" CommandParameter="InSession" 
+                                            Content="In Session" Padding="8,3" FontSize="11" FontWeight="Bold" Background="#1E40AF" Foreground="#60A5FA" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                    <Button Command="{Binding SetFleetFilterCommand}" CommandParameter="Offline" 
+                                            Content="Offline" Padding="8,3" FontSize="11" FontWeight="Bold" Background="#374151" Foreground="#9CA3AF" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+                                    <Button Command="{Binding RefreshFleetDataCommand}" 
+                                            Content="🔄 Refresh" Padding="10,3" FontSize="11" FontWeight="Bold" Background="#0284C7" Foreground="White" BorderThickness="0" Cursor="Hand"/>
+                                </StackPanel>
+
+                                <TextBox Text="{Binding FleetSearchQuery, UpdateSourceTrigger=PropertyChanged}" 
+                                         Background="#1E293B" Foreground="White" BorderBrush="#475569" Padding="6,4" FontSize="12" Margin="0,0,10,0"/>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Devices Table -->
+                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding FleetDevices}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#0F172A" BorderBrush="#334155" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                                            <DockPanel LastChildFill="True">
+                                                <!-- Action Buttons on Right -->
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Command="{Binding DataContext.ConnectToFleetDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            CommandParameter="{Binding}"
+                                                            Content="⚡ Connect" Background="#16A34A" Foreground="White" FontWeight="Bold" FontSize="11" Padding="8,3" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                                    <Button Command="{Binding DataContext.LaunchFleetDeviceTerminalCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            CommandParameter="{Binding}"
+                                                            Content="💻 Terminal" Background="#059669" Foreground="White" FontWeight="Bold" FontSize="11" Padding="8,3" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                                    <Button Command="{Binding DataContext.SendFleetLockCommandCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            CommandParameter="{Binding}"
+                                                            Content="🔒 Lock" Background="#334155" Foreground="#E2E8F0" FontWeight="SemiBold" FontSize="11" Padding="6,3" BorderThickness="0" Cursor="Hand" Margin="0,0,4,0"/>
+                                                    <Button Command="{Binding DataContext.SendFleetRebootCommandCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            CommandParameter="{Binding}"
+                                                            Content="🔄 Reboot" Background="#991B1B" Foreground="#FCA5A5" FontWeight="SemiBold" FontSize="11" Padding="6,3" BorderThickness="0" Cursor="Hand"/>
+                                                </StackPanel>
+
+                                                <!-- Device Details on Left -->
+                                                <StackPanel Orientation="Vertical">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding StatusBadge}" FontWeight="Bold" FontSize="12" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding Hostname}" FontWeight="Bold" Foreground="White" FontSize="13" Margin="0,0,8,0"/>
+                                                        <TextBlock Text="{Binding DeviceId}" FontFamily="Consolas" Foreground="#38BDF8" FontWeight="Bold" FontSize="12" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding IpAddress}" FontFamily="Consolas" Foreground="#94A3B8" FontSize="11" Margin="0,0,10,0"/>
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                        <TextBlock Text="{Binding OperatingSystem}" Foreground="#CBD5E1" FontSize="11" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding MemoryDisplay, StringFormat='RAM: {0}'}" Foreground="#94A3B8" FontSize="11" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding CpuModel}" Foreground="#64748B" FontSize="10" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding LastHeartbeatUtc, StringFormat='Last seen: {0:HH:mm:ss}'}" Foreground="#64748B" FontSize="10"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <!-- Footer -->
+                        <DockPanel Grid.Row="4" Margin="0,10,0,0" LastChildFill="True">
+                            <TextBlock Text="{Binding FleetDevices.Count, StringFormat='Total devices matching filter: {0}'}" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center"/>
                         </DockPanel>
                     </Grid>
                 </Border>
