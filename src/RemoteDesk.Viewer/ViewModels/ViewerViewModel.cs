@@ -12,6 +12,7 @@ using RemoteDesk.Core.Quality;
 using RemoteDesk.Core.Services;
 using RemoteDesk.Core.Terminal;
 using RemoteDesk.Platform.Windows;
+using RemoteDesk.Updater;
 using RemoteDesk.Platform.Windows.Audio;
 using RemoteDesk.Platform.Windows.Clipboard;
 using RemoteDesk.Platform.Windows.Security;
@@ -271,6 +272,28 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private DeviceRecord? _selectedFleetDevice;
 
+    // --- Phase 10 Auto-Update ---
+    private readonly UpdateManager _updateManager = new();
+    private UpdateReleaseManifest? _pendingUpdateRelease;
+
+    [ObservableProperty]
+    private bool _isUpdateAvailable;
+
+    [ObservableProperty]
+    private string _updateVersionText = string.Empty;
+
+    [ObservableProperty]
+    private string _updateReleaseNotes = string.Empty;
+
+    [ObservableProperty]
+    private double _updateDownloadProgress;
+
+    [ObservableProperty]
+    private bool _isDownloadingUpdate;
+
+    [ObservableProperty]
+    private string _updateStatusMessage = string.Empty;
+
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
@@ -279,6 +302,12 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         var keyStore = new DpapiDeviceKeyStore();
         _identity = new DeviceIdentity(keyStore);
         LocalDeviceId = _identity.DeviceId;
+
+        _updateManager.DownloadProgressChanged += progress =>
+        {
+            _dispatcher.Invoke(() => UpdateDownloadProgress = progress);
+        };
+        _ = CheckForUpdatesAsync();
 
         _ = LoadAddressBookAsync();
 
@@ -1404,6 +1433,59 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _ = RefreshFleetDataAsync();
     }
 
+    // --- Phase 10 Auto-Update Commands ---
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var result = await _updateManager.CheckForUpdatesAsync(FleetApiUrl, new Version(1, 0, 0));
+            if (result.IsUpdateAvailable && result.LatestRelease != null)
+            {
+                _pendingUpdateRelease = result.LatestRelease;
+                _dispatcher.Invoke(() =>
+                {
+                    UpdateVersionText = result.LatestRelease.Version;
+                    UpdateReleaseNotes = result.LatestRelease.ReleaseNotes;
+                    IsUpdateAvailable = true;
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Background update check failed.");
+        }
+    }
+
+    [RelayCommand]
+    private async Task DownloadAndApplyUpdateAsync()
+    {
+        if (_pendingUpdateRelease == null) return;
+
+        IsDownloadingUpdate = true;
+        UpdateStatusMessage = $"Downloading v{_pendingUpdateRelease.Version}...";
+
+        var tempSetupPath = Path.Combine(Path.GetTempPath(), $"RemoteDesk-Setup-{_pendingUpdateRelease.Version}.exe");
+        var success = await _updateManager.DownloadAndVerifyUpdateAsync(_pendingUpdateRelease, tempSetupPath);
+
+        if (success)
+        {
+            UpdateStatusMessage = "Applying update...";
+            UpdateManager.ApplyUpdateAndHandover(tempSetupPath, "/SILENT");
+        }
+        else
+        {
+            UpdateStatusMessage = "Update verification failed.";
+            IsDownloadingUpdate = false;
+        }
+    }
+
+    [RelayCommand]
+    private void DismissUpdateBanner()
+    {
+        IsUpdateAvailable = false;
+    }
+
     private void StopLoopback()
     {
         _statsTimer.Stop();
@@ -1440,6 +1522,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         DisconnectRemote();
         StopLoopback();
         _fleetClientService?.Dispose();
+        _updateManager.Dispose();
         _renderer.Dispose();
         _identity.Dispose();
     }

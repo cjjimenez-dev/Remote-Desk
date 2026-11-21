@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:RemoteDesk.Viewer.ViewModels"
         mc:Ignorable="d"
-        Title="RemoteDesk Viewer - Phase 9 Fleet Dashboard"
+        Title="RemoteDesk Viewer - v1.0 Production"
         Height="850" Width="1350"
         Background="#18181B"
         WindowStartupLocation="CenterScreen"
@@ -16,6 +16,7 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -30,7 +31,7 @@
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="RemoteDesk" FontSize="18" FontWeight="Bold" Foreground="#60A5FA" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <Border Background="#374151" CornerRadius="4" Padding="6,2" Margin="0,0,12,0" VerticalAlignment="Center">
-                        <TextBlock Text="Phase 9: Fleet Dashboard" FontSize="11" Foreground="#9CA3AF"/>
+                        <TextBlock Text="v1.0 Production Ready" FontSize="11" Foreground="#9CA3AF"/>
                     </Border>
 
                     <!-- My Local Device ID Display -->
@@ -152,8 +153,31 @@
             </DockPanel>
         </Border>
 
+        <!-- Update Available Notification Banner -->
+        <Border Grid.Row="1" Background="#065F46" Padding="12,8" BorderBrush="#047857" BorderThickness="0,0,0,1"
+                Visibility="{Binding IsUpdateAvailable, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding DownloadAndApplyUpdateCommand}" 
+                            Content="⚡ Update Now" Background="#10B981" Foreground="White" FontWeight="Bold" Padding="12,4" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+                    <Button Command="{Binding DismissUpdateBannerCommand}" 
+                            Content="✕ Dismiss" Background="Transparent" Foreground="#A7F3D0" BorderThickness="0" Cursor="Hand"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="🚀 NEW VERSION AVAILABLE: " FontWeight="Bold" Foreground="#6EE7B7" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="{Binding UpdateVersionText, StringFormat='v{0}'}" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="{Binding UpdateReleaseNotes}" Foreground="#D1FAE5" FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <ProgressBar Value="{Binding UpdateDownloadProgress}" Minimum="0" Maximum="100" Width="100" Height="10" VerticalAlignment="Center"
+                                 Visibility="{Binding IsDownloadingUpdate, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"/>
+                    <TextBlock Text="{Binding UpdateStatusMessage}" Foreground="#FDE047" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0"
+                               Visibility="{Binding IsDownloadingUpdate, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- File Transfer Progress Banner -->
-        <Border Grid.Row="1" Background="#1E3A8A" Padding="12,6"
+        <Border Grid.Row="2" Background="#1E3A8A" Padding="12,6"
                 Visibility="{Binding IsFileTransferActive, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
             <DockPanel LastChildFill="True">
                 <Button DockPanel.Dock="Right" Command="{Binding CancelFileTransferCommand}" 
@@ -167,7 +191,7 @@
         </Border>
 
         <!-- Emergency Kill Switch Alert Banner -->
-        <Border Grid.Row="2" Background="#7F1D1D" Padding="12,6" 
+        <Border Grid.Row="3" Background="#7F1D1D" Padding="12,6" 
                 Visibility="{Binding IsEmergencyKillTriggered, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
             <DockPanel LastChildFill="True">
                 <Button DockPanel.Dock="Right" Command="{Binding ResetEmergencyKillCommand}" 
@@ -180,7 +204,7 @@
         </Border>
 
         <!-- Video Display Canvas & Side Panels -->
-        <Grid Grid.Row="3" Background="#09090B" ClipToBounds="True">
+        <Grid Grid.Row="4" Background="#09090B" ClipToBounds="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -581,7 +605,7 @@
         </Grid>
 
         <!-- Bottom Status Bar -->
-        <Border Grid.Row="4" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
+        <Border Grid.Row="5" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
             <DockPanel LastChildFill="True">
                 <TextBlock Text="{Binding StatusText}" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center"/>
             </DockPanel>

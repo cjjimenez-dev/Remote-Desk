@@ -12,6 +12,7 @@
     <ProjectReference Include="..\RemoteDesk.Core\RemoteDesk.Core.csproj" />
     <ProjectReference Include="..\RemoteDesk.Platform.Windows\RemoteDesk.Platform.Windows.csproj" />
     <ProjectReference Include="..\RemoteDesk.Transport.WebRtc\RemoteDesk.Transport.WebRtc.csproj" />
+    <ProjectReference Include="..\RemoteDesk.Updater\RemoteDesk.Updater.csproj" />
   </ItemGroup>
 
   <ItemGroup>

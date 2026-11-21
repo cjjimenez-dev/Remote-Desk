@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RemoteDesk.Core\RemoteDesk.Core.csproj" />
+    <ProjectReference Include="..\RemoteDesk.Updater\RemoteDesk.Updater.csproj" />
   </ItemGroup>
 
   <ItemGroup>

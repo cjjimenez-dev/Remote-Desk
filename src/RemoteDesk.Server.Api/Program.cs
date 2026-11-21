@@ -1,6 +1,7 @@
 using System.Text.Json;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Server.Api.Data;
+using RemoteDesk.Updater.Security;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -123,6 +124,43 @@ app.MapPost("/api/fleet/audit", async (FleetAuditRecord audit, IFleetRepository 
     await repo.RecordAuditAsync(audit, ct);
     return Results.Ok();
 });
+
+// --- Auto-Update Endpoints ---
+var (releasePubKey, releasePrivKey) = UpdateSigner.GenerateSigningKeyPair();
+
+var latestManifest = new UpdateReleaseManifest
+{
+    Version = "1.1.0",
+    ReleaseDateUtc = DateTime.UtcNow,
+    DownloadUrl = "http://localhost:5001/api/updates/download/RemoteDesk-Setup-1.1.0.exe",
+    Sha256Checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    IsMandatory = false,
+    ReleaseNotes = "RemoteDesk 1.1.0: Full Fleet Management, ConPTY Remote Terminal, Multi-Monitor & WASAPI Audio Loopback support.",
+    PackageSizeBytes = 15 * 1024 * 1024,
+    MinSupportedVersion = "1.0.0"
+};
+latestManifest.Signature = UpdateSigner.SignManifest(latestManifest.Version, latestManifest.Sha256Checksum, releasePrivKey);
+
+app.MapGet("/api/updates/public-key", () => Results.Ok(new { PublicKey = Convert.ToBase64String(releasePubKey) }));
+
+app.MapGet("/api/updates/check", (string? version) =>
+{
+    if (string.IsNullOrWhiteSpace(version)) version = "1.0.0";
+    bool updateAvailable = false;
+    if (Version.TryParse(version, out var clientVer) && Version.TryParse(latestManifest.Version, out var latestVer))
+    {
+        updateAvailable = latestVer > clientVer;
+    }
+
+    return Results.Ok(new UpdateCheckResult
+    {
+        IsUpdateAvailable = updateAvailable,
+        LatestRelease = updateAvailable ? latestManifest : null,
+        CurrentVersion = version
+    });
+});
+
+app.MapGet("/api/updates/releases", () => Results.Ok(new[] { latestManifest }));
 
 // Web Dashboard UI
 app.MapGet("/", () => Results.Content(DashboardHtml, "text/html"));
