@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <StartupObject>RemoteDesk.Viewer.App</StartupObject>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
@@ -9,8 +10,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\RemoteDesk.Core\RemoteDesk.Core.csproj" />
     <ProjectReference Include="..\RemoteDesk.Platform.Windows\RemoteDesk.Platform.Windows.csproj" />
+    <ProjectReference Include="..\RemoteDesk.Server.Signaling\RemoteDesk.Server.Signaling.csproj" />
+    <ProjectReference Include="..\RemoteDesk.Server.Api\RemoteDesk.Server.Api.csproj" />
     <ProjectReference Include="..\RemoteDesk.Transport.WebRtc\RemoteDesk.Transport.WebRtc.csproj" />
     <ProjectReference Include="..\RemoteDesk.Updater\RemoteDesk.Updater.csproj" />
   </ItemGroup>

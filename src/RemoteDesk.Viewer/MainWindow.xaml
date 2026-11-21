@@ -483,6 +483,8 @@
                         <DockPanel Grid.Row="0" Margin="0,0,0,12" LastChildFill="True">
                             <Button DockPanel.Dock="Right" Command="{Binding ToggleFleetDashboardCommand}" 
                                     Content="✕" Background="Transparent" Foreground="#94A3B8" BorderThickness="0" FontWeight="Bold" FontSize="14" Cursor="Hand"/>
+                            <Button DockPanel.Dock="Right" Command="{Binding OpenWebDashboardCommand}" 
+                                    Content="🌐 Open in Browser" Background="#0284C7" Foreground="White" BorderThickness="0" FontWeight="Bold" FontSize="11" Padding="8,3" Cursor="Hand" Margin="0,0,12,0"/>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="🏢 Fleet Management &amp; Inventory" FontSize="16" FontWeight="Bold" Foreground="#F8FAFC" VerticalAlignment="Center" Margin="0,0,12,0"/>
                                 <Border Background="#0284C7" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
@@ -607,6 +609,16 @@
         <!-- Bottom Status Bar -->
         <Border Grid.Row="5" Background="#18181B" Padding="12,6" BorderBrush="#27272A" BorderThickness="0,1,0,0">
             <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#27272A" CornerRadius="4" Padding="6,2" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding ServerStatusBadge}" Foreground="{Binding ServerStatusColor}" FontSize="11" FontWeight="Bold"/>
+                    </Border>
+                    <Button Command="{Binding OpenWebDashboardCommand}" 
+                            Content="🌐 Web Dashboard" 
+                            Background="#1E293B" Foreground="#38BDF8" BorderThickness="0" 
+                            FontSize="11" FontWeight="SemiBold" Padding="6,2" Cursor="Hand"
+                            ToolTip="Open live Web Fleet Dashboard in default browser (http://localhost:5001/dashboard)"/>
+                </StackPanel>
                 <TextBlock Text="{Binding StatusText}" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center"/>
             </DockPanel>
         </Border>

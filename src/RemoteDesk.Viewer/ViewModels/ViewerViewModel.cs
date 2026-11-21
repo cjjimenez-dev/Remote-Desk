@@ -18,6 +18,7 @@ using RemoteDesk.Platform.Windows.Clipboard;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Transport.WebRtc;
 using RemoteDesk.Viewer.Rendering;
+using RemoteDesk.Viewer.Servers;
 using Serilog;
 using SIPSorcery.Net;
 
@@ -294,6 +295,21 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _updateStatusMessage = string.Empty;
 
+    // --- Integrated Servers (Signaling & Fleet Manager) ---
+    private readonly IntegratedServerManager _serverManager = new();
+
+    [ObservableProperty]
+    private string _serverStatusBadge = "🟡 Starting Local Servers...";
+
+    [ObservableProperty]
+    private string _serverStatusColor = "#F59E0B";
+
+    [ObservableProperty]
+    private bool _isLocalSignalingActive;
+
+    [ObservableProperty]
+    private bool _isLocalFleetActive;
+
     public ViewerViewModel(Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
@@ -307,7 +323,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         {
             _dispatcher.Invoke(() => UpdateDownloadProgress = progress);
         };
-        _ = CheckForUpdatesAsync();
+        _ = InitializeIntegratedServersAsync();
 
         _ = LoadAddressBookAsync();
 
@@ -1517,6 +1533,64 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         StatusText = "Loopback stopped.";
     }
 
+    private async Task InitializeIntegratedServersAsync()
+    {
+        try
+        {
+            await _serverManager.StartServersAsync().ConfigureAwait(false);
+            _dispatcher.Invoke(() =>
+            {
+                IsLocalSignalingActive = _serverManager.IsSignalingHostedLocally;
+                IsLocalFleetActive = _serverManager.IsFleetApiHostedLocally;
+
+                if (IsLocalSignalingActive && IsLocalFleetActive)
+                {
+                    ServerStatusBadge = "🟢 Local Servers (5000/5001)";
+                    ServerStatusColor = "#10B981";
+                }
+                else if (IsLocalSignalingActive || IsLocalFleetActive)
+                {
+                    ServerStatusBadge = "🟡 Hybrid Server (Local/Ext)";
+                    ServerStatusColor = "#F59E0B";
+                }
+                else
+                {
+                    ServerStatusBadge = "🌐 External Servers Active";
+                    ServerStatusColor = "#3B82F6";
+                }
+            });
+
+            // Perform initial background update check now that the Fleet API server is ready
+            await CheckForUpdatesAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Failed to initialize integrated servers.");
+            _dispatcher.Invoke(() =>
+            {
+                ServerStatusBadge = "⚠️ Server Startup Error";
+                ServerStatusColor = "#EF4444";
+            });
+        }
+    }
+
+    [RelayCommand]
+    private void OpenWebDashboard()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "http://localhost:5001/dashboard",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning(ex, "Could not open web dashboard.");
+        }
+    }
+
     public void Dispose()
     {
         DisconnectRemote();
@@ -1525,5 +1599,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _updateManager.Dispose();
         _renderer.Dispose();
         _identity.Dispose();
+        _ = Task.Run(async () =>
+        {
+            try { await _serverManager.DisposeAsync().ConfigureAwait(false); } catch { }
+        });
     }
 }
