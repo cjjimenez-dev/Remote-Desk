@@ -1465,7 +1465,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         IsDownloadingUpdate = true;
         UpdateStatusMessage = $"Downloading v{_pendingUpdateRelease.Version}...";
 
-        var tempSetupPath = Path.Combine(Path.GetTempPath(), $"RemoteDesk-Setup-{_pendingUpdateRelease.Version}.exe");
+        var tempSetupPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"RemoteDesk-Setup-{_pendingUpdateRelease.Version}.exe");
         var success = await _updateManager.DownloadAndVerifyUpdateAsync(_pendingUpdateRelease, tempSetupPath);
 
         if (success)
