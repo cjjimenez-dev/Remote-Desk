@@ -103,6 +103,41 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void OnVideoDragOver(object sender, DragEventArgs e)
+    {
+        if (_viewModel.IsRemoteSessionActive && e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Copy;
+            _viewModel.IsDragOverRemoteScreen = true;
+            e.Handled = true;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+            _viewModel.IsDragOverRemoteScreen = false;
+        }
+    }
+
+    private void OnVideoDragLeave(object sender, DragEventArgs e)
+    {
+        _viewModel.IsDragOverRemoteScreen = false;
+    }
+
+    private async void OnVideoDrop(object sender, DragEventArgs e)
+    {
+        _viewModel.IsDragOverRemoteScreen = false;
+        if (!_viewModel.IsRemoteSessionActive) return;
+
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
+            {
+                e.Handled = true;
+                await _viewModel.SendDroppedFilesAsync(files);
+            }
+        }
+    }
+
     private static RemoteDesk.Core.Models.MouseButton? MapMouseButton(System.Windows.Input.MouseButton button)
     {
         return button switch

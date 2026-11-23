@@ -4,6 +4,7 @@ using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
 using RemoteDesk.Core.Quality;
 using RemoteDesk.Core.Security;
+using RemoteDesk.Core.Services;
 using RemoteDesk.Platform.Windows;
 using RemoteDesk.Transport.WebRtc;
 using Serilog;
@@ -26,6 +27,7 @@ public sealed class HostSessionServer : IAsyncDisposable
     private IVideoEncoder? _encoder;
     private IInputInjector? _injector;
     private EmergencyKillSwitch? _killSwitch;
+    private FileTransferService? _fileTransferService;
 
     private readonly object _sessionLock = new();
     private string? _activeViewerConnId;
@@ -217,6 +219,17 @@ public sealed class HostSessionServer : IAsyncDisposable
                     _injector.SetTargetDisplay(display);
                 }
 
+                if (_activeTransport != null)
+                {
+                    _fileTransferService = new FileTransferService(_activeTransport);
+                    _fileTransferService.ProgressUpdated += progress =>
+                    {
+                        var status = progress.IsCompleted ? "Completed" : (progress.ErrorMessage ?? $"{progress.BytesTransferred * 100 / Math.Max(1, progress.TotalBytes)}%");
+                        Logger.Information("Host file transfer: {File} - {Status} ({Bytes}/{Total})",
+                            progress.FileName, status, progress.BytesTransferred, progress.TotalBytes);
+                    };
+                }
+
                 _encoder = new FFmpegH264Encoder();
 
                 _capturer.FrameCaptured += frame =>
@@ -326,6 +339,9 @@ public sealed class HostSessionServer : IAsyncDisposable
             _killSwitch = null;
 
             _injector = null;
+
+            _fileTransferService?.Dispose();
+            _fileTransferService = null;
 
             if (_activeTransport != null)
             {

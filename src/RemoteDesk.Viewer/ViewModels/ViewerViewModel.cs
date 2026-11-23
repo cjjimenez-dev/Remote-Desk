@@ -19,6 +19,7 @@ using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Transport.WebRtc;
 using RemoteDesk.Viewer.Rendering;
 using RemoteDesk.Viewer.Servers;
+using RemoteDesk.Viewer.Services;
 using Serilog;
 using SIPSorcery.Net;
 
@@ -156,6 +157,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string? _activeFileTransferId;
+
+    [ObservableProperty]
+    private bool _isDragOverRemoteScreen;
 
     // Audio
     [ObservableProperty]
@@ -334,6 +338,21 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _autoAcceptIncoming = true;
 
+    // --- LAN Discovery & Network Presence ---
+    private readonly LanDiscoveryService _lanDiscovery = new();
+
+    [ObservableProperty]
+    private string _localLanIp = "127.0.0.1";
+
+    [ObservableProperty]
+    private bool _isLanPeerDiscovered;
+
+    [ObservableProperty]
+    private string _discoveredPeerText = string.Empty;
+
+    [ObservableProperty]
+    private string _discoveredPeerIp = string.Empty;
+
     partial void OnAutoAcceptIncomingChanged(bool value)
     {
         if (_hostServer != null)
@@ -350,6 +369,24 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         var keyStore = new DpapiDeviceKeyStore();
         _identity = new DeviceIdentity(keyStore);
         LocalDeviceId = _identity.DeviceId;
+
+        LocalLanIp = LanDiscoveryService.GetLocalLanIp();
+        _lanDiscovery.ServerDiscovered += (ip, port, name) =>
+        {
+            _dispatcher.Invoke(() =>
+            {
+                DiscoveredPeerIp = ip;
+                DiscoveredPeerText = $"📡 Found RemoteDesk on LAN: {name} ({ip})";
+                IsLanPeerDiscovered = true;
+
+                // Auto-sync if current server is still localhost and we discover a remote host
+                if (SignalingHostInput == "localhost")
+                {
+                    SignalingHostInput = ip;
+                    _ = ApplySignalingServerChangeAsync();
+                }
+            });
+        };
 
         _updateManager.DownloadProgressChanged += progress =>
         {
@@ -445,7 +482,14 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             {
                 _dispatcher.Invoke(() =>
                 {
-                    StatusText = $"Connection rejected: {reason}";
+                    if (reason.Contains("offline or ID does not exist", StringComparison.OrdinalIgnoreCase))
+                    {
+                        StatusText = $"❌ Partner [{TargetHostId}] not found on server ({SignalingHostInput}). Both PCs must connect to the SAME server IP!";
+                    }
+                    else
+                    {
+                        StatusText = $"Connection rejected: {reason}";
+                    }
                     DisconnectRemote();
                 });
             };
@@ -803,7 +847,14 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to connect to host.");
-            StatusText = $"Connection failed: {ex.Message}";
+            if (ex is System.Net.Http.HttpRequestException || ex.Message.Contains("refused") || ex.Message.Contains("actively refused"))
+            {
+                StatusText = $"❌ Cannot reach server at {SignalingHostInput}:5000. Check IP and Windows Firewall!";
+            }
+            else
+            {
+                StatusText = $"Connection failed: {ex.Message}";
+            }
             DisconnectRemote();
         }
     }
@@ -1178,6 +1229,28 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             await _fileTransferService.CancelTransferAsync(ActiveFileTransferId);
             IsFileTransferActive = false;
             FileTransferStatusText = "Transfer cancelled.";
+        }
+    }
+
+    public async Task SendDroppedFilesAsync(string[] filePaths)
+    {
+        if (_fileTransferService == null || !IsRemoteSessionActive) return;
+
+        foreach (var filePath in filePaths)
+        {
+            if (!System.IO.File.Exists(filePath)) continue;
+
+            try
+            {
+                IsFileTransferActive = true;
+                FileTransferStatusText = $"Transferring {System.IO.Path.GetFileName(filePath)}...";
+                ActiveFileTransferId = await _fileTransferService.SendFileAsync(filePath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to transfer dropped file: {Path}", filePath);
+                FileTransferStatusText = $"Error transferring {System.IO.Path.GetFileName(filePath)}: {ex.Message}";
+            }
         }
     }
 
@@ -1647,6 +1720,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 });
             };
             await _hostServer.StartAsync().ConfigureAwait(false);
+
+            // Start LAN auto-discovery service
+            _lanDiscovery.Start(_serverManager.IsSignalingHostedLocally, 5000, Environment.MachineName);
         }
         catch (Exception ex)
         {
@@ -1657,6 +1733,23 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 ServerStatusColor = "#EF4444";
             });
         }
+    }
+
+    [RelayCommand]
+    private async Task UseDiscoveredLanServerAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(DiscoveredPeerIp))
+        {
+            SignalingHostInput = DiscoveredPeerIp;
+            await ApplySignalingServerChangeAsync();
+            IsLanPeerDiscovered = false;
+        }
+    }
+
+    [RelayCommand]
+    private void DismissLanDiscoveryBanner()
+    {
+        IsLanPeerDiscovered = false;
     }
 
     [RelayCommand]
@@ -1721,6 +1814,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     {
         DisconnectRemote();
         StopLoopback();
+        _lanDiscovery.Dispose();
         _fleetClientService?.Dispose();
         _updateManager.Dispose();
         _renderer.Dispose();

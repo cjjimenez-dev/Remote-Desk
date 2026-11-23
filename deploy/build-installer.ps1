@@ -115,9 +115,47 @@ pause
 "@
 [System.IO.File]::WriteAllText((Join-Path $publishRoot "INSTALL-SERVICE.bat"), $installServiceBat)
 
-# Generate SHA-256 Checksums for all published binaries
+$allowFirewallBat = @"
+@echo off
+title RemoteDesk - Configure Windows Firewall for LAN Access
+cd /d "%~dp0"
+
+echo =======================================================
+echo    RemoteDesk - Windows Firewall Configuration
+echo =======================================================
+echo.
+echo This script opens Windows Firewall ports so other computers
+echo on your Wi-Fi/LAN can connect to this desktop.
+echo.
+
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] Must be run as Administrator!
+    echo Please right-click ALLOW-FIREWALL.bat and select 'Run as administrator'.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Adding Windows Firewall rules for RemoteDesk...
+netsh advfirewall firewall add rule name="RemoteDesk Application" dir=in action=allow program="%~dp0RemoteDesk.Viewer\RemoteDesk.Viewer.exe" enable=yes profile=any
+netsh advfirewall firewall add rule name="RemoteDesk Signaling (Port 5000)" dir=in action=allow protocol=TCP localport=5000 profile=any
+netsh advfirewall firewall add rule name="RemoteDesk Fleet API (Port 5001)" dir=in action=allow protocol=TCP localport=5001 profile=any
+netsh advfirewall firewall add rule name="RemoteDesk LAN Discovery (Port 5004)" dir=in action=allow protocol=UDP localport=5004 profile=any
+
+echo.
+echo [SUCCESS] Windows Firewall rules added successfully!
+echo Other computers on your Wi-Fi/LAN can now connect seamlessly.
+echo.
+pause
+"@
+[System.IO.File]::WriteAllText((Join-Path $publishRoot "ALLOW-FIREWALL.bat"), $allowFirewallBat)
+
+# Generate SHA-256 Checksums for primary published binaries and scripts
 $checksumFile = Join-Path $publishRoot "SHA256SUMS.txt"
-$files = Get-ChildItem -Path $publishRoot -Recurse -File | Where-Object { $_.Extension -in @(".exe", ".dll", ".ps1", ".bat") }
+$files = Get-ChildItem -Path $publishRoot -Recurse -File | Where-Object { 
+    $_.Extension -in @(".bat", ".ps1") -or ($_.Extension -in @(".exe", ".dll") -and $_.Name -like "RemoteDesk*")
+}
 $sb = [System.Text.StringBuilder]::new()
 
 foreach ($f in $files) {
@@ -135,7 +173,11 @@ if (Test-Path $zipPath) {
     Remove-Item -Force $zipPath
 }
 Write-Host "Creating distribution zip at: $zipPath..." -ForegroundColor Yellow
-Compress-Archive -Path "$publishRoot\*" -DestinationPath $zipPath -CompressionLevel Optimal
+if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
+    & tar.exe -a -c -f $zipPath -C $publishRoot .
+} else {
+    Compress-Archive -Path "$publishRoot\*" -DestinationPath $zipPath -CompressionLevel Fastest
+}
 Write-Host "Distribution zip created successfully!" -ForegroundColor Green
 
 Write-Host "==================================================" -ForegroundColor Green

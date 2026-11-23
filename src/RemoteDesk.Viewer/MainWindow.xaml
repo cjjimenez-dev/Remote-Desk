@@ -296,6 +296,20 @@
             </DockPanel>
         </Border>
 
+        <!-- LAN Peer Discovered Banner (Automatic Wi-Fi / Local Network Sync) -->
+        <Border Grid.Row="1" Background="#0C2A4D" BorderBrush="#0284C7" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,6"
+                Visibility="{Binding IsLanPeerDiscovered, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding UseDiscoveredLanServerCommand}" 
+                            Content="⚡ Connect to this LAN PC" Style="{StaticResource EmilConnectButton}" Height="26" Padding="10,0" Margin="0,0,8,0"/>
+                    <Button Command="{Binding DismissLanDiscoveryBannerCommand}" 
+                            Content="✕" Background="Transparent" Foreground="#94A3B8" BorderThickness="0" Cursor="Hand" Padding="4,0"/>
+                </StackPanel>
+                <TextBlock Text="{Binding DiscoveredPeerText}" FontWeight="SemiBold" Foreground="#E0F2FE" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
         <!-- Incoming Connection Prompt Banner (When someone requests to connect to This Desk) -->
         <Border Grid.Row="1" Background="#0C2A4D" BorderBrush="#0284C7" BorderThickness="1" CornerRadius="8" Margin="14,8,14,0" Padding="12,8"
                 Visibility="{Binding IsIncomingPromptVisible, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
@@ -384,7 +398,8 @@
             </Grid.ColumnDefinitions>
 
             <!-- Video Center Area -->
-            <Grid Grid.Column="0">
+            <Grid Grid.Column="0" AllowDrop="True"
+                  DragOver="OnVideoDragOver" DragLeave="OnVideoDragLeave" Drop="OnVideoDrop">
                 <Image x:Name="VideoImageControl"
                        Source="{Binding VideoImage}" 
                        Stretch="Uniform" 
@@ -393,6 +408,21 @@
                        MouseUp="OnVideoMouseUp"
                        MouseMove="OnVideoMouseMove"
                        MouseWheel="OnVideoMouseWheel"/>
+
+                <!-- Drag and Drop File Transfer Visual Target Overlay -->
+                <Border Background="#E6090D16" BorderBrush="#38BDF8" BorderThickness="2"
+                        CornerRadius="14" Margin="30" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="40,28"
+                        Visibility="{Binding IsDragOverRemoteScreen, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                        IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="24" ShadowDepth="2" Color="#0284C7" Opacity="0.5"/>
+                    </Border.Effect>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="📁" FontSize="44" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                        <TextBlock Text="Drop files here to transfer to remote desktop" FontSize="16" FontWeight="Bold" Foreground="#38BDF8" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Files will be saved to Downloads/RemoteDesk" FontSize="11" Foreground="#94A3B8" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- AnyDesk Official Design Dashboard (When no session is active) -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
@@ -432,7 +462,7 @@
                                     <TextBlock Text="Your Address" FontSize="12" Foreground="#9CA3AF" Margin="0,0,0,6"/>
                                     
                                     <!-- Spaced Address Box with One-Click Copy -->
-                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,12">
+                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,8">
                                         <DockPanel LastChildFill="True">
                                             <Button DockPanel.Dock="Right" Command="{Binding CopyDeviceIdCommand}" 
                                                     Style="{StaticResource EmilHeaderButton}" Height="30" Padding="10,0" ToolTip="{Binding CopiedTooltipText}">
@@ -446,15 +476,23 @@
                                         </DockPanel>
                                     </Border>
 
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                    <!-- Your Local IP Address Capsule -->
+                                    <Border Background="#16161B" BorderBrush="#2A2A38" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,0,10">
+                                        <DockPanel LastChildFill="True">
+                                            <TextBlock Text="Your Local IP:" FontSize="11" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding LocalLanIp}" FontFamily="Consolas, Cascadia Code" FontWeight="Bold" Foreground="#38BDF8" FontSize="11" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                         <Ellipse Width="7" Height="7" Fill="#22C55E" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                         <TextBlock Text="AnyDesk is ready for incoming connections." FontSize="11" Foreground="#9CA3AF" VerticalAlignment="Center"/>
                                     </StackPanel>
 
                                     <CheckBox IsChecked="{Binding AutoAcceptIncoming}" Content="Auto-accept incoming connections" 
                                               Foreground="#D1D5DB" FontSize="11" Margin="0,0,0,6"/>
-                                    <TextBlock Text="Share this 9-digit address with anyone you want to allow to control this computer." 
-                                               FontSize="10" Foreground="#6B7280" TextWrapping="Wrap"/>
+                                    <TextBlock Text="To connect from another PC on your Wi-Fi, enter your Local IP in SERVER on the other PC." 
+                                               FontSize="10" Foreground="#A1A1AA" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 
@@ -477,7 +515,7 @@
                                     <TextBlock Text="Please enter the address of the remote device you'd like to see." FontSize="11" Foreground="#9CA3AF" Margin="0,0,0,8" TextWrapping="Wrap"/>
                                     
                                     <!-- Partner Address Input & AnyDesk Red Connect Button -->
-                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="3" Margin="0,0,0,12">
+                                    <Border Background="#141418" BorderBrush="#2F2F3D" BorderThickness="1" CornerRadius="8" Padding="3" Margin="0,0,0,10">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -501,11 +539,18 @@
                                         </Grid>
                                     </Border>
 
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,6">
+                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                            <TextBlock Text="Target Server:" FontSize="10" Foreground="#71717A" Margin="0,0,4,0"/>
+                                            <TextBlock Text="{Binding SignalingHostInput}" FontFamily="Consolas" FontWeight="Bold" Foreground="#38BDF8" FontSize="11"/>
+                                        </StackPanel>
+                                        <CheckBox DockPanel.Dock="Right" IsChecked="{Binding ForceRelay}" Content="Force Relay" 
+                                                  Foreground="#71717A" VerticalAlignment="Center" FontSize="10"/>
+                                    </DockPanel>
+
                                     <DockPanel LastChildFill="False" Margin="0,0,0,4">
-                                        <CheckBox DockPanel.Dock="Left" IsChecked="{Binding ForceRelay}" Content="Force TURN Relay Mode" 
-                                                  Foreground="#D1D5DB" VerticalAlignment="Center" FontSize="11"/>
                                         <Button DockPanel.Dock="Right" Command="{Binding ToggleAddressBookCommand}" 
-                                                Style="{StaticResource EmilHeaderButton}" Content="📖 Address Book" Height="24" Padding="8,0" FontSize="10"/>
+                                                Style="{StaticResource EmilHeaderButton}" Content="📖 Address Book" Height="22" Padding="8,0" FontSize="10"/>
                                     </DockPanel>
                                     <TextBlock Text="Direct low-latency P2P WebRTC with encrypted TURN relay fallback." 
                                                FontSize="10" Foreground="#6B7280" Margin="0,6,0,0"/>
