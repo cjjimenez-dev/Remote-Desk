@@ -26,20 +26,16 @@ $projects = @(
     @{ Name = "RemoteDesk.Host.Service"; Path = "src/RemoteDesk.Host.Service/RemoteDesk.Host.Service.csproj"; Runtime = "win-x64" },
     @{ Name = "RemoteDesk.Host.Agent"; Path = "src/RemoteDesk.Host.Agent/RemoteDesk.Host.Agent.csproj"; Runtime = "win-x64" },
     @{ Name = "RemoteDesk.Updater"; Path = "src/RemoteDesk.Updater/RemoteDesk.Updater.csproj"; Runtime = "win-x64" },
-    @{ Name = "RemoteDesk.Server.Api"; Path = "src/RemoteDesk.Server.Api/RemoteDesk.Server.Api.csproj"; Runtime = "" },
-    @{ Name = "RemoteDesk.Server.Signaling"; Path = "src/RemoteDesk.Server.Signaling/RemoteDesk.Server.Signaling.csproj"; Runtime = "" }
+    @{ Name = "RemoteDesk.Server.Api"; Path = "src/RemoteDesk.Server.Api/RemoteDesk.Server.Api.csproj"; Runtime = "win-x64" },
+    @{ Name = "RemoteDesk.Server.Signaling"; Path = "src/RemoteDesk.Server.Signaling/RemoteDesk.Server.Signaling.csproj"; Runtime = "win-x64" }
 )
 
 foreach ($proj in $projects) {
     $out = Join-Path $publishRoot $proj.Name
-    Write-Host "Publishing $($proj.Name)..." -ForegroundColor Yellow
+    Write-Host "Publishing $($proj.Name) (Self-Contained win-x64)..." -ForegroundColor Yellow
 
     $projPath = Join-Path $rootDir $proj.Path
-    if ($proj.Runtime -ne "") {
-        dotnet publish $projPath -c $Configuration -r $proj.Runtime --self-contained false -p:Version=$Version -o $out
-    } else {
-        dotnet publish $projPath -c $Configuration -p:Version=$Version -o $out
-    }
+    dotnet publish $projPath -c $Configuration -r $proj.Runtime --self-contained true -p:Version=$Version -o $out
 }
 
 # Copy installation scripts
