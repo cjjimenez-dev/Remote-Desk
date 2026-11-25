@@ -274,7 +274,7 @@ foreach ($f in $files) {
 [System.IO.File]::WriteAllText($checksumFile, $sb.ToString())
 Write-Host "Generated SHA-256 checksums at: $checksumFile" -ForegroundColor Green
 
-# Create Distribution Zip
+# Create Distribution Zip & RAR via local temp staging (fast and atomic so partial archives are never exposed)
 $artifactsDir = Join-Path $rootDir "artifacts"
 $zipPath = Join-Path $artifactsDir "RemoteDesk-v1.0-Windows.zip"
 $rarPath = Join-Path $artifactsDir "RemoteDesk-v1.0-Windows.rar"
@@ -282,21 +282,42 @@ $rarPath = Join-Path $artifactsDir "RemoteDesk-v1.0-Windows.rar"
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 if (Test-Path $rarPath) { Remove-Item -Force $rarPath }
 
-Write-Host "Creating distribution zip at: $zipPath..." -ForegroundColor Yellow
-if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
-    & tar.exe -a -c -f $zipPath -C $publishRoot .
-} else {
-    Compress-Archive -Path "$publishRoot\*" -DestinationPath $zipPath -CompressionLevel Fastest
-}
+$stageDist = Join-Path $env:TEMP "RemoteDesk-Stage-Dist"
+$tempZip = Join-Path $env:TEMP "RemoteDesk-v1.0-Windows.zip"
+$tempRar = Join-Path $env:TEMP "RemoteDesk-v1.0-Windows.rar"
+
+if (Test-Path $stageDist) { cmd /c "rmdir /s /q `"$stageDist`"" }
+if (Test-Path $tempZip) { Remove-Item -Force $tempZip }
+if (Test-Path $tempRar) { Remove-Item -Force $tempRar }
+
+Write-Host "Staging distribution files to local temp..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Path $stageDist -Force | Out-Null
+& robocopy $publishRoot $stageDist /E /MT:16 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+
+Write-Host "Creating standard Windows-compatible zip at: $zipPath..." -ForegroundColor Yellow
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($stageDist, $tempZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+$tempDestZip = "$zipPath.tmp"
+Copy-Item -Path $tempZip -Destination $tempDestZip -Force
+Move-Item -Path $tempDestZip -Destination $zipPath -Force
+Remove-Item -Force $tempZip
 Write-Host "Distribution zip created successfully!" -ForegroundColor Green
 
 # Create Distribution RAR if WinRAR is installed
 $winRarExe = "C:\Program Files\WinRAR\Rar.exe"
 if (Test-Path $winRarExe) {
     Write-Host "Creating distribution RAR at: $rarPath..." -ForegroundColor Yellow
-    & $winRarExe a -r -ep1 -m3 "$rarPath" "$publishRoot\*" | Out-Null
-    Write-Host "Distribution RAR created successfully!" -ForegroundColor Green
+    & $winRarExe a -r -ep1 -m3 -mt8 "$tempRar" "$stageDist\*" | Out-Null
+    if (Test-Path $tempRar) {
+        $tempDestRar = "$rarPath.tmp"
+        Copy-Item -Path $tempRar -Destination $tempDestRar -Force
+        Move-Item -Path $tempDestRar -Destination $rarPath -Force
+        Remove-Item -Force $tempRar
+        Write-Host "Distribution RAR created successfully!" -ForegroundColor Green
+    }
 }
+
+if (Test-Path $stageDist) { cmd /c "rmdir /s /q `"$stageDist`"" }
 
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host " Packaging completed: $publishRoot" -ForegroundColor Green
