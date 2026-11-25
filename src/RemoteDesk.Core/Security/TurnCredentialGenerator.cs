@@ -27,6 +27,42 @@ public static class TurnCredentialGenerator
         return (username, credential, expiresAt);
     }
 
+    /// <summary>
+    /// Builds ICE server configuration from environment variables when a TURN server is configured,
+    /// otherwise returns only public Anycast STUN servers (no non-existent placeholder TURN hosts).
+    /// </summary>
+    public static List<IceServerConfig> GetConfiguredIceServers(string? deviceId)
+    {
+        var turnHost = Environment.GetEnvironmentVariable("TURN_HOST");
+        var turnSecret = Environment.GetEnvironmentVariable("TURN_SECRET");
+
+        if (string.IsNullOrWhiteSpace(turnHost) ||
+            string.Equals(turnHost.Trim(), "turn.remotedesk.net", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(turnSecret))
+        {
+            return new List<IceServerConfig>
+            {
+                new("stun:stun.l.google.com:19302"),
+                new("stun:stun.cloudflare.com:3478")
+            };
+        }
+
+        var udpPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_UDP_PORT"), out var u) ? u : 3478;
+        var tlsPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_TLS_PORT"), out var t) ? t : 5349;
+        var fallbackPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_FALLBACK_PORT"), out var f) ? f : 443;
+        var id = string.IsNullOrWhiteSpace(deviceId) ? Guid.NewGuid().ToString("N")[..8] : deviceId;
+
+        return CreateIceServers(
+            turnHost.Trim(),
+            turnSecret,
+            id,
+            ttl: TimeSpan.FromHours(24),
+            udpPort: udpPort,
+            tcpPort: udpPort,
+            tlsPort: tlsPort,
+            fallbackTlsPort: fallbackPort);
+    }
+
     public static List<IceServerConfig> CreateIceServers(
         string turnHost,
         string sharedSecret,
@@ -43,8 +79,9 @@ public static class TurnCredentialGenerator
 
         var servers = new List<IceServerConfig>
         {
-            // Primary Public STUN servers
+            // Primary Public Anycast STUN servers (Google & Cloudflare)
             new("stun:stun.l.google.com:19302"),
+            new("stun:stun.cloudflare.com:3478"),
 
             // Host STUN endpoints
             new($"stun:{turnHost}:{udpPort}"),

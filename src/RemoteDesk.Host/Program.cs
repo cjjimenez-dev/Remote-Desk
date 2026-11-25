@@ -3,6 +3,7 @@ using RemoteDesk.Core.Interfaces;
 using RemoteDesk.Core.Models;
 using RemoteDesk.Core.Protocol;
 using RemoteDesk.Core.Security;
+using RemoteDesk.Core.Services;
 using RemoteDesk.Platform.Windows;
 using RemoteDesk.Platform.Windows.Security;
 using RemoteDesk.Platform.Windows.Session;
@@ -30,7 +31,7 @@ for (var i = 0; i < args.Length; i++)
 {
     if (args[i] == "--server" && i + 1 < args.Length)
     {
-        serverUrl = args[++i];
+        serverUrl = ServerEndpointParser.Parse(args[++i]).SignalingUrl;
     }
     else if (args[i] == "--id" && i + 1 < args.Length)
     {

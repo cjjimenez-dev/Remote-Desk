@@ -47,8 +47,9 @@ public class TurnCredentialGeneratorTests
         servers.Should().NotBeNull();
         servers.Count.Should().BeGreaterThanOrEqualTo(6);
 
-        // Check Google STUN
+        // Check Google & Cloudflare Public Anycast STUN
         servers.Should().Contain(s => s.Urls.Any(u => u.Contains("stun:stun.l.google.com:19302")));
+        servers.Should().Contain(s => s.Urls.Any(u => u.Contains("stun:stun.cloudflare.com:3478")));
 
         // Check Host STUN
         servers.Should().Contain(s => s.Urls.Any(u => u.StartsWith($"stun:{turnHost}:3478")));
@@ -72,5 +73,29 @@ public class TurnCredentialGeneratorTests
         servers.Should().Contain(s => s.Urls.Any(u => u.StartsWith($"turns:{turnHost}:443?transport=tcp")) &&
                                      !string.IsNullOrEmpty(s.Username) &&
                                      !string.IsNullOrEmpty(s.Credential));
+    }
+
+    [Fact]
+    public void GetConfiguredIceServers_WithoutTurnEnv_ReturnsOnlyPublicStun()
+    {
+        var prevHost = Environment.GetEnvironmentVariable("TURN_HOST");
+        var prevSecret = Environment.GetEnvironmentVariable("TURN_SECRET");
+        try
+        {
+            Environment.SetEnvironmentVariable("TURN_HOST", null);
+            Environment.SetEnvironmentVariable("TURN_SECRET", null);
+
+            var servers = TurnCredentialGenerator.GetConfiguredIceServers("device-1");
+
+            servers.Should().HaveCount(2);
+            servers.Should().Contain(s => s.Urls.Any(u => u == "stun:stun.l.google.com:19302"));
+            servers.Should().Contain(s => s.Urls.Any(u => u == "stun:stun.cloudflare.com:3478"));
+            servers.Should().NotContain(s => s.Urls.Any(u => u.Contains("remotedesk.net")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TURN_HOST", prevHost);
+            Environment.SetEnvironmentVariable("TURN_SECRET", prevSecret);
+        }
     }
 }

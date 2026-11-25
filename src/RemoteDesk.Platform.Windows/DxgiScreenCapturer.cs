@@ -124,6 +124,7 @@ public sealed class DxgiScreenCapturer : IScreenCapturer
 
                 if (acquireResult.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code)
                 {
+                    Thread.Sleep(5);
                     continue;
                 }
 

@@ -44,7 +44,12 @@ for (var i = 0; i < args.Length; i++)
     }
     else if (args[i] == "--server" && i + 1 < args.Length)
     {
-        serverUrl = args[++i];
+        var endpoint = ServerEndpointParser.Parse(args[++i]);
+        serverUrl = endpoint.SignalingUrl;
+        if (fleetUrl == "http://localhost:5001")
+        {
+            fleetUrl = endpoint.FleetApiUrl;
+        }
     }
     else if (args[i] == "--fleet-url" && i + 1 < args.Length)
     {

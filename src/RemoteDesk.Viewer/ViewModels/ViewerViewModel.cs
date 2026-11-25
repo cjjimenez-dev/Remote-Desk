@@ -90,7 +90,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private bool _isEmergencyKillTriggered;
 
     [ObservableProperty]
-    private string _targetHostId = "123-456";
+    private string _targetHostId = string.Empty;
 
     [ObservableProperty]
     private string _signalingServerUrl = "http://localhost:5000/signaling";
@@ -336,10 +336,56 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     private string _signalingHostInput = "localhost";
 
     [ObservableProperty]
-    private bool _autoAcceptIncoming = true;
+    private bool _autoAcceptIncoming = false;
 
     // --- LAN Discovery & Network Presence ---
     private readonly LanDiscoveryService _lanDiscovery = new();
+
+    // --- Built-in Cloudflare Internet Tunnel ---
+    private readonly CloudflareTunnelService _tunnelService = new();
+
+    [ObservableProperty]
+    private bool _isCloudflareTunnelActive;
+
+    [ObservableProperty]
+    private bool _isStartingCloudflareTunnel;
+
+    [ObservableProperty]
+    private string _cloudflareTunnelHost = string.Empty;
+
+    partial void OnCloudflareTunnelHostChanged(string value)
+    {
+        OnPropertyChanged(nameof(InternetAddress));
+    }
+
+    public string InternetAddress => !string.IsNullOrEmpty(CloudflareTunnelHost) ? $"{LocalDeviceId}@{CloudflareTunnelHost}" : string.Empty;
+
+    [RelayCommand]
+    private void CopyInternetAddress()
+    {
+        if (!string.IsNullOrEmpty(InternetAddress))
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(InternetAddress);
+                CopiedTooltipText = "Copied Internet Address!";
+                StatusText = $"Copied Internet ID ({InternetAddress}) to clipboard! Share this with your remote partner.";
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "Failed to copy Internet Address to clipboard.");
+            }
+        }
+    }
+
+    [ObservableProperty]
+    private string _cloudflareTunnelUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _tunnelButtonText = "☁️ Internet Tunnel";
+
+    [ObservableProperty]
+    private string _tunnelButtonTooltip = "Start free built-in Cloudflare Tunnel for remoting across the internet";
 
     [ObservableProperty]
     private string _localLanIp = "127.0.0.1";
@@ -352,6 +398,37 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _discoveredPeerIp = string.Empty;
+
+    [ObservableProperty]
+    private string _discoveredPeerDeviceId = string.Empty;
+
+    [ObservableProperty]
+    private bool _isAdvancedSettingsVisible;
+
+    [RelayCommand]
+    private void ToggleAdvancedSettings()
+    {
+        IsAdvancedSettingsVisible = !IsAdvancedSettingsVisible;
+    }
+
+    [ObservableProperty]
+    private bool _isDarkTheme = false;
+
+    [ObservableProperty]
+    private string _themeToggleIcon = "🌙";
+
+    [ObservableProperty]
+    private string _themeToggleTooltip = "Switch to Dark Theme";
+
+    [RelayCommand]
+    private void ToggleTheme()
+    {
+        IsDarkTheme = !IsDarkTheme;
+        var theme = IsDarkTheme ? AppTheme.Dark : AppTheme.Light;
+        ThemeManager.ApplyTheme(theme);
+        ThemeToggleIcon = IsDarkTheme ? "☀️" : "🌙";
+        ThemeToggleTooltip = IsDarkTheme ? "Switch to Light Theme" : "Switch to Dark Theme";
+    }
 
     partial void OnAutoAcceptIncomingChanged(bool value)
     {
@@ -371,19 +448,20 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         LocalDeviceId = _identity.DeviceId;
 
         LocalLanIp = LanDiscoveryService.GetLocalLanIp();
-        _lanDiscovery.ServerDiscovered += (ip, port, name) =>
+        _lanDiscovery.ServerDiscovered += (ip, port, name, deviceId) =>
         {
             _dispatcher.Invoke(() =>
             {
                 DiscoveredPeerIp = ip;
-                DiscoveredPeerText = $"📡 Found RemoteDesk on LAN: {name} ({ip})";
+                DiscoveredPeerDeviceId = deviceId;
+                DiscoveredPeerText = string.IsNullOrWhiteSpace(deviceId)
+                    ? $"📡 Found RemoteDesk on LAN: {name} ({ip})"
+                    : $"📡 Found RemoteDesk on LAN: {name} ({ip}) • ID: {deviceId}";
                 IsLanPeerDiscovered = true;
 
-                // Auto-sync if current server is still localhost and we discover a remote host
-                if (SignalingHostInput == "localhost")
+                if (!string.IsNullOrWhiteSpace(deviceId) && string.IsNullOrWhiteSpace(TargetHostId))
                 {
-                    SignalingHostInput = ip;
-                    _ = ApplySignalingServerChangeAsync();
+                    TargetHostId = deviceId;
                 }
             });
         };
@@ -412,6 +490,37 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _statsTimer.Tick += OnStatsTimerTick;
 
         LoadDisplays();
+
+        _tunnelService.TunnelStatusChanged += status =>
+        {
+            _dispatcher.Invoke(() => StatusText = status);
+        };
+
+        _tunnelService.TunnelUrlDiscovered += url =>
+        {
+            _dispatcher.Invoke(() =>
+            {
+                var uri = new Uri(url);
+                CloudflareTunnelHost = uri.Host;
+                CloudflareTunnelUrl = url;
+                IsCloudflareTunnelActive = true;
+                IsStartingCloudflareTunnel = false;
+                TunnelButtonText = $"☁️ {CloudflareTunnelHost}";
+                TunnelButtonTooltip = $"Active Internet Tunnel: {url} (Click to stop)";
+                StatusText = $"🌐 Internet Tunnel Active! Share your Internet ID: {InternetAddress}";
+            });
+        };
+
+        _tunnelService.TunnelError += err =>
+        {
+            _dispatcher.Invoke(() =>
+            {
+                IsStartingCloudflareTunnel = false;
+                IsCloudflareTunnelActive = false;
+                TunnelButtonText = "☁️ Internet Tunnel";
+                StatusText = $"❌ {err}";
+            });
+        };
     }
 
     partial void OnIsLoopbackActiveChanged(bool value)
@@ -468,15 +577,65 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var cleanTargetId = TargetHostId.Trim();
+        string? targetServerHost = null;
+
+        // AnyDesk Flow: Check for Internet ID (e.g. 579-591@random-words.trycloudflare.com or 579-591@192.168.0.161)
+        if (cleanTargetId.Contains('@'))
+        {
+            var parts = cleanTargetId.Split('@', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 2)
+            {
+                cleanTargetId = parts[0].Trim();
+                targetServerHost = parts[1].Trim();
+            }
+        }
+        else if (cleanTargetId.Contains("trycloudflare.com", StringComparison.OrdinalIgnoreCase) || cleanTargetId.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || cleanTargetId.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            var s = cleanTargetId.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? cleanTargetId : "https://" + cleanTargetId;
+            if (Uri.TryCreate(s, UriKind.Absolute, out var uri))
+            {
+                targetServerHost = uri.Host;
+                if (!string.IsNullOrWhiteSpace(uri.UserInfo))
+                {
+                    cleanTargetId = uri.UserInfo;
+                }
+            }
+        }
+
+        // Resolve outgoing signaling server for THIS session ONLY without hijacking the local Host registration
+        string outgoingSignalingUrl = SignalingServerUrl;
+        string outgoingServerDisplay = SignalingHostInput;
+
+        if (!string.IsNullOrWhiteSpace(targetServerHost))
+        {
+            var endpoint = ServerEndpointParser.Parse(targetServerHost);
+            outgoingSignalingUrl = endpoint.SignalingUrl;
+            outgoingServerDisplay = endpoint.Host;
+            Logger.Information("Target ID indicates remote server {Server}. Routing outgoing session to {Url}...", targetServerHost, outgoingSignalingUrl);
+        }
+        else if (_lanDiscovery.DiscoveredPeers.TryGetValue(cleanTargetId, out var lanPeer) ||
+            (!string.IsNullOrWhiteSpace(DiscoveredPeerDeviceId) && cleanTargetId.Equals(DiscoveredPeerDeviceId.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            var targetIp = lanPeer?.Ip ?? DiscoveredPeerIp;
+            if (!string.IsNullOrWhiteSpace(targetIp))
+            {
+                var endpoint = ServerEndpointParser.Parse(targetIp);
+                outgoingSignalingUrl = endpoint.SignalingUrl;
+                outgoingServerDisplay = endpoint.Host;
+                Logger.Information("Target ID [{TargetId}] recognized as local LAN partner at {TargetIp}. Routing outgoing session to {Url}...", cleanTargetId, targetIp, outgoingSignalingUrl);
+            }
+        }
+
         IsConnecting = true;
-        StatusText = $"Connecting to signaling server at {SignalingServerUrl}...";
+        StatusText = $"Connecting to [{cleanTargetId}]...";
 
         try
         {
             FFmpegBootstrapper.Initialize();
             _decoder = new FFmpegH264Decoder();
 
-            _signalingClient = new SignalingClient(SignalingServerUrl);
+            _signalingClient = new SignalingClient(outgoingSignalingUrl);
 
             _signalingClient.ConnectionRejected += reason =>
             {
@@ -484,7 +643,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 {
                     if (reason.Contains("offline or ID does not exist", StringComparison.OrdinalIgnoreCase))
                     {
-                        StatusText = $"❌ Partner [{TargetHostId}] not found on server ({SignalingHostInput}). Both PCs must connect to the SAME server IP!";
+                        StatusText = $"❌ Partner [{cleanTargetId}] not found on server ({outgoingServerDisplay}). Check partner ID or Internet ID.";
                     }
                     else
                     {
@@ -507,13 +666,33 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                     StatusText = $"Host [{res.HostDeviceId}] accepted connection [{res.SessionId}]. Negotiating WebRTC...";
                 });
 
+                // WebRTC negotiation watchdog: prevent infinite hanging if ICE/STUN/Relay fails
+                var negotiationCts = new CancellationTokenSource();
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(25), negotiationCts.Token);
+                        _dispatcher.Invoke(() =>
+                        {
+                            if (IsConnecting && !IsRemoteSessionActive)
+                            {
+                                Logger.Warning("WebRTC negotiation timed out after 25s.");
+                                StatusText = $"❌ WebRTC negotiation timed out with [{cleanTargetId}]. (Ensure Force Relay is OFF and both devices are reachable).";
+                                DisconnectRemote();
+                            }
+                        });
+                    }
+                    catch (OperationCanceledException) { }
+                });
+
                 try
                 {
                     // Fetch dynamic STUN/TURN servers from broker
                     List<IceServerConfig>? iceServers = null;
                     try
                     {
-                        iceServers = await _signalingClient.GetIceServersAsync(TargetHostId);
+                        iceServers = await _signalingClient.GetIceServersAsync(cleanTargetId);
                         Logger.Information("Retrieved {Count} ICE servers from signaling broker.", iceServers.Count);
                     }
                     catch (Exception ex)
@@ -548,7 +727,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                                     ConnectionPathColor = "#6B7280";
                                     break;
                             }
-                            StatusText = $"Connected to [{TargetHostId}] via WebRTC ({ConnectionPathBadge})";
+                            StatusText = $"Connected to [{cleanTargetId}] via WebRTC ({ConnectionPathBadge})";
                         });
                     };
 
@@ -567,14 +746,15 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                             Logger.Information("Remote WebRTC state: {State}", state);
                             if (state == TransportState.Connected)
                             {
+                                try { negotiationCts.Cancel(); } catch { }
                                 IsRemoteSessionActive = true;
                                 IsConnecting = false;
                                 IsInputEnabled = _grantedPermissions.HasFlag(SessionPermissions.Control);
-                                StatusText = $"Connected to [{TargetHostId}] via WebRTC ({ConnectionPathBadge})";
+                                StatusText = $"Connected to [{cleanTargetId}] via WebRTC ({ConnectionPathBadge})";
                                 _statsTimer.Start();
 
                                 // 1. Record connection in Address Book
-                                _ = _addressBookService.RecordConnectionAsync(TargetHostId);
+                                _ = _addressBookService.RecordConnectionAsync(cleanTargetId);
 
                                 // 2. Clipboard Sync
                                 if (_grantedPermissions.HasFlag(SessionPermissions.Clipboard))
@@ -783,38 +963,48 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 {
                     Logger.Information("Received SDP answer from Host. Verifying DTLS fingerprint signature...");
 
-                    if (answer.DtlsFingerprintSignature != null && answer.SenderPublicKey != null)
+                    if (answer.DtlsFingerprintSignature == null || answer.SenderPublicKey == null)
                     {
-                        var valid = DtlsFingerprintProtector.VerifySignedSdp(
-                            answer.Sdp,
-                            answer.SessionId,
-                            answer.SenderDeviceId,
-                            answer.TargetConnectionId,
-                            answer.DtlsFingerprint,
-                            answer.DtlsFingerprintSignature,
-                            answer.SenderPublicKey,
-                            answer.Timestamp);
-
-                        if (!valid)
-                        {
-                            Logger.Error("SECURITY ALERT: Host SDP Answer DTLS fingerprint signature mismatch or expired! Possible MITM tampering.");
-                            _dispatcher.Invoke(() =>
-                            {
-                                StatusText = "SECURITY ALERT: SDP Answer DTLS fingerprint signature mismatch! Session aborted.";
-                                SecurityStatusBadge = "⚠️ MITM Tampering Detected";
-                                SecurityStatusColor = "#EF4444";
-                                DisconnectRemote();
-                            });
-                            return;
-                        }
-
-                        Logger.Information(">>> Host DTLS Fingerprint signature successfully verified against Host ECDSA public key!");
+                        Logger.Error("SECURITY ALERT: Host SDP Answer is unsigned! Possible MITM downgrade attack.");
                         _dispatcher.Invoke(() =>
                         {
-                            SecurityStatusBadge = "🔒 Verified E2EE (ECDSA)";
-                            SecurityStatusColor = "#10B981";
+                            StatusText = "SECURITY ALERT: Unsigned SDP Answer rejected.";
+                            SecurityStatusBadge = "⚠️ Unsigned SDP Rejected";
+                            SecurityStatusColor = "#EF4444";
+                            DisconnectRemote();
                         });
+                        return;
                     }
+
+                    var valid = DtlsFingerprintProtector.VerifySignedSdp(
+                        answer.Sdp,
+                        answer.SessionId,
+                        answer.SenderDeviceId,
+                        answer.TargetConnectionId,
+                        answer.DtlsFingerprint,
+                        answer.DtlsFingerprintSignature,
+                        answer.SenderPublicKey,
+                        answer.Timestamp);
+
+                    if (!valid)
+                    {
+                        Logger.Error("SECURITY ALERT: Host SDP Answer DTLS fingerprint signature mismatch or expired! Possible MITM tampering.");
+                        _dispatcher.Invoke(() =>
+                        {
+                            StatusText = "SECURITY ALERT: SDP Answer DTLS fingerprint signature mismatch! Session aborted.";
+                            SecurityStatusBadge = "⚠️ MITM Tampering Detected";
+                            SecurityStatusColor = "#EF4444";
+                            DisconnectRemote();
+                        });
+                        return;
+                    }
+
+                    Logger.Information(">>> Host DTLS Fingerprint signature successfully verified against Host ECDSA public key!");
+                    _dispatcher.Invoke(() =>
+                    {
+                        SecurityStatusBadge = "🔒 Verified E2EE (ECDSA)";
+                        SecurityStatusColor = "#10B981";
+                    });
 
                     await _transport.SetRemoteDescriptionAsync(RTCSdpType.answer, answer.Sdp);
                 }
@@ -829,15 +1019,15 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
 
             await _signalingClient.ConnectAsync();
-            StatusText = $"Requesting authenticated session with Host [{TargetHostId}]...";
+            StatusText = $"Requesting authenticated session with Host [{cleanTargetId}]...";
 
             // Sign connection request with Viewer DeviceIdentity
             var reqTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var reqPayload = $"{TargetHostId}:{_identity.DeviceId}:{reqTimestamp}";
+            var reqPayload = $"{cleanTargetId}:{_identity.DeviceId}:{reqTimestamp}";
             var reqSig = _identity.Sign(reqPayload);
 
             await _signalingClient.RequestConnectionAsync(
-                TargetHostId,
+                cleanTargetId,
                 ViewerName,
                 _identity.DeviceId,
                 _identity.PublicKeyBytes,
@@ -849,7 +1039,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             Logger.Error(ex, "Failed to connect to host.");
             if (ex is System.Net.Http.HttpRequestException || ex.Message.Contains("refused") || ex.Message.Contains("actively refused"))
             {
-                StatusText = $"❌ Cannot reach server at {SignalingHostInput}:5000. Check IP and Windows Firewall!";
+                StatusText = $"❌ Cannot reach server at {outgoingSignalingUrl}. Check domain, internet connection, or firewall!";
             }
             else
             {
@@ -1696,7 +1886,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             // await CheckForUpdatesAsync().ConfigureAwait(false);
 
             // Initialize Background Host Engine to allow other computers to connect to This Desk
-            _hostServer = new HostSessionServer(LocalDeviceId, ViewerName, SignalingServerUrl, ForceRelay)
+            _hostServer = new HostSessionServer(_identity, ViewerName, SignalingServerUrl, ForceRelay)
             {
                 AutoAcceptConnections = AutoAcceptIncoming
             };
@@ -1711,6 +1901,15 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                     }
                 });
             };
+            _hostServer.IncomingSessionStarting += (viewerName, viewerId) =>
+            {
+                _dispatcher.Invoke(() =>
+                {
+                    IncomingSessionText = $"⚡ INCOMING CONNECTION: {viewerName} (ID: {viewerId}) is connecting...";
+                    IsServingIncomingSession = true;
+                    StatusText = $"Incoming connection from {viewerName} ({viewerId}). Negotiating...";
+                });
+            };
             _hostServer.IncomingConnectionPrompt += (viewerName, viewerId) =>
             {
                 _dispatcher.Invoke(() =>
@@ -1722,7 +1921,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             await _hostServer.StartAsync().ConfigureAwait(false);
 
             // Start LAN auto-discovery service
-            _lanDiscovery.Start(_serverManager.IsSignalingHostedLocally, 5000, Environment.MachineName);
+            _lanDiscovery.Start(_serverManager.IsSignalingHostedLocally, 5000, Environment.MachineName, LocalDeviceId);
         }
         catch (Exception ex)
         {
@@ -1740,8 +1939,17 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     {
         if (!string.IsNullOrWhiteSpace(DiscoveredPeerIp))
         {
-            SignalingHostInput = DiscoveredPeerIp;
-            await ApplySignalingServerChangeAsync();
+            if (!string.IsNullOrWhiteSpace(DiscoveredPeerDeviceId))
+            {
+                TargetHostId = $"{DiscoveredPeerDeviceId}@{DiscoveredPeerIp}";
+                StatusText = $"Connecting to {DiscoveredPeerDeviceId} on {DiscoveredPeerIp}...";
+                await ConnectRemoteAsync();
+            }
+            else
+            {
+                SignalingHostInput = DiscoveredPeerIp;
+                StatusText = $"Target LAN server {DiscoveredPeerIp} ready. Enter Partner ID and click Connect.";
+            }
             IsLanPeerDiscovered = false;
         }
     }
@@ -1782,14 +1990,38 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ApplySignalingServerChangeAsync()
     {
-        var host = string.IsNullOrWhiteSpace(SignalingHostInput) ? "localhost" : SignalingHostInput.Trim();
-        SignalingServerUrl = $"http://{host}:5000/signaling";
-        FleetApiUrl = $"http://{host}:5001";
+        var endpoint = ServerEndpointParser.Parse(SignalingHostInput);
+        SignalingServerUrl = endpoint.SignalingUrl;
+        FleetApiUrl = endpoint.FleetApiUrl;
         StatusText = $"Signaling target updated to: {SignalingServerUrl}";
 
         if (_hostServer != null)
         {
             await _hostServer.StartAsync(SignalingServerUrl);
+        }
+    }
+
+    [RelayCommand]
+    private Task ToggleCloudflareTunnelAsync()
+    {
+        if (IsCloudflareTunnelActive || IsStartingCloudflareTunnel)
+        {
+            _tunnelService.StopTunnel();
+            IsCloudflareTunnelActive = false;
+            IsStartingCloudflareTunnel = false;
+            CloudflareTunnelHost = string.Empty;
+            CloudflareTunnelUrl = string.Empty;
+            TunnelButtonText = "☁️ Internet Tunnel";
+            TunnelButtonTooltip = "Start free built-in Cloudflare Tunnel for remoting across the internet";
+            StatusText = "Cloudflare Tunnel stopped. Ready on local network.";
+            return Task.CompletedTask;
+        }
+        else
+        {
+            IsStartingCloudflareTunnel = true;
+            TunnelButtonText = "☁️ Starting...";
+            StatusText = "Starting built-in Cloudflare Tunnel for internet remoting...";
+            return Task.Run(() => _tunnelService.StartTunnelAsync(5000));
         }
     }
 
@@ -1812,6 +2044,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _tunnelService.Dispose();
         DisconnectRemote();
         StopLoopback();
         _lanDiscovery.Dispose();

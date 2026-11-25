@@ -16,6 +16,7 @@ public sealed class HostSessionServer : IAsyncDisposable
 {
     private static readonly ILogger Logger = Log.ForContext<HostSessionServer>();
 
+    private readonly DeviceIdentity _identity;
     private readonly string _hostDeviceId;
     private readonly string _deviceName;
     private string _signalingUrl;
@@ -41,15 +42,19 @@ public sealed class HostSessionServer : IAsyncDisposable
     public string? ActiveViewerDeviceId => _activeViewerDeviceId;
 
     public event Action<string, string>? IncomingConnectionPrompt;
+    public event Action<string, string>? IncomingSessionStarting;
     public event Action? SessionStarted;
     public event Action? SessionEnded;
     public event Action? StatusChanged;
 
-    public bool AutoAcceptConnections { get; set; } = true;
+    private int _isEncodingFrame;
 
-    public HostSessionServer(string hostDeviceId, string deviceName, string signalingUrl, bool forceRelay = false)
+    public bool AutoAcceptConnections { get; set; } = false;
+
+    public HostSessionServer(DeviceIdentity identity, string deviceName, string signalingUrl, bool forceRelay = false)
     {
-        _hostDeviceId = hostDeviceId;
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _hostDeviceId = identity.DeviceId;
         _deviceName = deviceName;
         _signalingUrl = signalingUrl;
         _forceRelay = forceRelay;
@@ -78,7 +83,7 @@ public sealed class HostSessionServer : IAsyncDisposable
             _signalingClient.IceCandidateReceived += HandleIceCandidateReceived;
 
             await _signalingClient.ConnectAsync().ConfigureAwait(false);
-            var registered = await _signalingClient.RegisterHostAsync(_hostDeviceId, _deviceName).ConfigureAwait(false);
+            var registered = await _signalingClient.RegisterHostAsync(_hostDeviceId, _deviceName, _identity.PublicKeyBytes).ConfigureAwait(false);
             IsHostRegistered = registered;
 
             if (registered)
@@ -97,6 +102,30 @@ public sealed class HostSessionServer : IAsyncDisposable
 
     private void HandleConnectionRequested(SignalingConnectionRequest req)
     {
+        // Verify viewer cryptographic request signature when provided
+        if (req.ViewerPublicKey == null || req.RequestSignature == null)
+        {
+            Logger.Warning("Rejecting unsigned connection request from [{ViewerName}] ({ViewerConn}).", req.ViewerName, req.ViewerConnectionId);
+            _ = _signalingClient?.RejectConnectionAsync(req.ViewerConnectionId, "Unsigned connection request rejected.");
+            return;
+        }
+
+        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (Math.Abs(nowUnix - req.Timestamp) > 300)
+        {
+            Logger.Warning("Rejecting expired connection request from [{ViewerName}] (ts={Timestamp}).", req.ViewerName, req.Timestamp);
+            _ = _signalingClient?.RejectConnectionAsync(req.ViewerConnectionId, "Connection request timestamp expired.");
+            return;
+        }
+
+        var expectedPayload = $"{_hostDeviceId}:{req.ViewerDeviceId}:{req.Timestamp}";
+        if (!DeviceIdentity.VerifySignature(req.ViewerPublicKey, expectedPayload, req.RequestSignature))
+        {
+            Logger.Warning("Rejecting connection request with invalid signature from [{ViewerName}] ({ViewerDeviceId}).", req.ViewerName, req.ViewerDeviceId);
+            _ = _signalingClient?.RejectConnectionAsync(req.ViewerConnectionId, "Invalid viewer request signature.");
+            return;
+        }
+
         lock (_sessionLock)
         {
             if (_activeViewerConnId != null)
@@ -116,6 +145,7 @@ public sealed class HostSessionServer : IAsyncDisposable
         if (AutoAcceptConnections)
         {
             Logger.Information("Auto-accepting incoming connection from [{ViewerName}] ({ViewerDeviceId})...", req.ViewerName, req.ViewerDeviceId);
+            IncomingSessionStarting?.Invoke(req.ViewerName, req.ViewerDeviceId);
             _ = AcceptIncomingConnectionAsync();
         }
         else
@@ -128,14 +158,23 @@ public sealed class HostSessionServer : IAsyncDisposable
     {
         string? viewerConnId;
         string? sessionId;
+        string? viewerName;
+        string? viewerDeviceId;
 
         lock (_sessionLock)
         {
             viewerConnId = _activeViewerConnId;
             sessionId = _activeSessionId;
+            viewerName = _activeViewerName;
+            viewerDeviceId = _activeViewerDeviceId;
         }
 
         if (viewerConnId == null || sessionId == null || _signalingClient == null) return;
+
+        if (!AutoAcceptConnections && viewerName != null && viewerDeviceId != null)
+        {
+            IncomingSessionStarting?.Invoke(viewerName, viewerDeviceId);
+        }
 
         try
         {
@@ -212,7 +251,17 @@ public sealed class HostSessionServer : IAsyncDisposable
                 _killSwitch = new EmergencyKillSwitch(_injector);
                 _killSwitch.Start();
 
-                _capturer = new GdiScreenCapturer();
+                try
+                {
+                    _capturer = new DxgiScreenCapturer();
+                    Logger.Information("Host using DXGI GPU Hardware Screen Capturer.");
+                }
+                catch (Exception dxgiEx)
+                {
+                    Logger.Warning(dxgiEx, "DXGI screen capturer unavailable, falling back to GDI capturer.");
+                    _capturer = new GdiScreenCapturer();
+                }
+
                 var display = _capturer.CurrentDisplay;
                 if (display != null && _injector != null)
                 {
@@ -234,6 +283,13 @@ public sealed class HostSessionServer : IAsyncDisposable
 
                 _capturer.FrameCaptured += frame =>
                 {
+                    // Frame-drop throttling: if encoder is already processing previous frame, drop this one to avoid lag
+                    if (Interlocked.CompareExchange(ref _isEncodingFrame, 1, 0) != 0)
+                    {
+                        frame.Dispose();
+                        return;
+                    }
+
                     try
                     {
                         var enc = _encoder?.Encode(frame);
@@ -249,6 +305,7 @@ public sealed class HostSessionServer : IAsyncDisposable
                     finally
                     {
                         frame.Dispose();
+                        Interlocked.Exchange(ref _isEncodingFrame, 0);
                     }
                 };
 
@@ -289,6 +346,14 @@ public sealed class HostSessionServer : IAsyncDisposable
                         var key = ProtocolSerializer.Deserialize<KeyMessage>(env.Payload);
                         _injector.InjectKey(key.ScanCode, key.IsExtended, key.State);
                         break;
+
+                    case MessageType.TextUnicode:
+                        var textMsg = ProtocolSerializer.Deserialize<UnicodeTextMessage>(env.Payload);
+                        if (!string.IsNullOrEmpty(textMsg.Text))
+                        {
+                            _injector.InjectUnicodeText(textMsg.Text);
+                        }
+                        break;
                 }
             }
         }
@@ -300,11 +365,41 @@ public sealed class HostSessionServer : IAsyncDisposable
         {
             try
             {
+                if (offer.DtlsFingerprintSignature == null || offer.SenderPublicKey == null ||
+                    !DtlsFingerprintProtector.VerifySignedSdp(
+                        offer.Sdp,
+                        offer.SessionId,
+                        offer.SenderDeviceId,
+                        offer.TargetConnectionId,
+                        offer.DtlsFingerprint,
+                        offer.DtlsFingerprintSignature,
+                        offer.SenderPublicKey,
+                        offer.Timestamp))
+                {
+                    Logger.Error("SECURITY ALERT: Offer DTLS fingerprint signature missing or invalid! Aborting session.");
+                    CloseSession();
+                    return;
+                }
+
                 await _activeTransport.SetRemoteDescriptionAsync(RTCSdpType.offer, offer.Sdp).ConfigureAwait(false);
                 var answerSdp = await _activeTransport.CreateAnswerAsync().ConfigureAwait(false);
                 if (_signalingClient != null)
                 {
-                    await _signalingClient.SendAnswerAsync(offer.FromConnectionId, offer.SessionId, answerSdp).ConfigureAwait(false);
+                    var (fingerprint, signature, pubKey, timestamp) = DtlsFingerprintProtector.SignSdp(
+                        _identity,
+                        offer.SessionId,
+                        offer.FromConnectionId,
+                        answerSdp);
+
+                    await _signalingClient.SendAnswerAsync(
+                        offer.FromConnectionId,
+                        offer.SessionId,
+                        answerSdp,
+                        _identity.DeviceId,
+                        pubKey,
+                        fingerprint,
+                        signature,
+                        timestamp).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)

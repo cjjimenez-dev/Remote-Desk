@@ -16,7 +16,8 @@ $rootDir = Split-Path -Parent $PSScriptRoot
 $publishRoot = Join-Path $rootDir $OutputDir
 
 if (Test-Path $publishRoot) {
-    Remove-Item -Recurse -Force $publishRoot
+    cmd /c "rmdir /s /q `"$publishRoot`""
+    if (Test-Path $publishRoot) { Remove-Item -Recurse -Force $publishRoot }
 }
 New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 
@@ -53,6 +54,112 @@ if (Test-Path $ffmpegSource) {
         $targetFfmpegDir = Join-Path (Join-Path $publishRoot $target) "ffmpeg"
         New-Item -ItemType Directory -Path $targetFfmpegDir -Force | Out-Null
         Copy-Item (Join-Path $ffmpegSource "*.dll") -Destination $targetFfmpegDir -Force
+    }
+}
+
+# Copy or download bundled cloudflared for built-in Cloudflare Tunnel
+$cfTarget = Join-Path (Join-Path $publishRoot "RemoteDesk.Viewer") "cloudflared.exe"
+$cfLocalBin = Join-Path (Join-Path $rootDir "deploy") "bin\cloudflared.exe"
+$cfAppData = Join-Path $env:LOCALAPPDATA "RemoteDesk\bin\cloudflared.exe"
+
+if (Test-Path $cfLocalBin) {
+    Copy-Item $cfLocalBin -Destination $cfTarget -Force
+} elseif (Test-Path $cfAppData) {
+    Copy-Item $cfAppData -Destination $cfTarget -Force
+} else {
+    try {
+        Write-Host "Downloading bundled cloudflared.exe..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfTarget -UseBasicParsing
+        Write-Host "Bundled cloudflared.exe successfully." -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not download cloudflared.exe. The application will download it on demand."
+    }
+}
+
+# Compile Native Win32 Launcher Executable
+$launcherSource = @"
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Windows.Forms;
+
+namespace RemoteDesk.Launcher
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main(string[] args)
+        {
+            try
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var candidates = new[]
+                {
+                    Path.Combine(baseDir, "RemoteDesk.Viewer", "RemoteDesk.Viewer.exe"),
+                    Path.Combine(baseDir, "dist", "RemoteDesk.Viewer", "RemoteDesk.Viewer.exe"),
+                    Path.Combine(baseDir, "RemoteDesk.Viewer.exe")
+                };
+
+                string target = null;
+                foreach (var c in candidates)
+                {
+                    if (File.Exists(c))
+                    {
+                        target = c;
+                        break;
+                    }
+                }
+
+                if (target != null)
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = target,
+                        WorkingDirectory = Path.GetDirectoryName(target),
+                        UseShellExecute = true
+                    };
+                    Process.Start(psi);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "RemoteDesk could not find the application binaries.\n\nPlease ensure RemoteDesk.Viewer folder exists next to this executable.",
+                        "RemoteDesk Launcher",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Error launching RemoteDesk:\n" + ex.Message,
+                    "RemoteDesk",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+    }
+}
+"@
+
+$cscExe = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if (Test-Path $cscExe) {
+    Write-Host "Compiling native RemoteDesk.exe launcher..." -ForegroundColor Yellow
+    $tempCs = Join-Path $env:TEMP "RemoteDeskLauncher.cs"
+    Set-Content -Path $tempCs -Value $launcherSource -Encoding UTF8
+    $iconPath = Join-Path $rootDir "src\RemoteDesk.Viewer\assets\icon.ico"
+    $launcherPublishTarget = Join-Path $publishRoot "RemoteDesk.exe"
+    $launcherArtifactTarget = Join-Path (Join-Path $rootDir "artifacts") "RemoteDesk.exe"
+    if (Test-Path $iconPath) {
+        & $cscExe /target:winexe /win32icon:$iconPath /out:$launcherPublishTarget $tempCs
+    } else {
+        & $cscExe /target:winexe /out:$launcherPublishTarget $tempCs
+    }
+    if (Test-Path $launcherPublishTarget) {
+        Copy-Item $launcherPublishTarget $launcherArtifactTarget -Force
+        Write-Host "Compiled RemoteDesk.exe successfully." -ForegroundColor Green
+    } else {
+        Write-Warning "Failed to compile RemoteDesk.exe"
     }
 }
 
@@ -168,10 +275,13 @@ foreach ($f in $files) {
 Write-Host "Generated SHA-256 checksums at: $checksumFile" -ForegroundColor Green
 
 # Create Distribution Zip
-$zipPath = Join-Path (Join-Path $rootDir "artifacts") "RemoteDesk-v1.0-Windows.zip"
-if (Test-Path $zipPath) {
-    Remove-Item -Force $zipPath
-}
+$artifactsDir = Join-Path $rootDir "artifacts"
+$zipPath = Join-Path $artifactsDir "RemoteDesk-v1.0-Windows.zip"
+$rarPath = Join-Path $artifactsDir "RemoteDesk-v1.0-Windows.rar"
+
+if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+if (Test-Path $rarPath) { Remove-Item -Force $rarPath }
+
 Write-Host "Creating distribution zip at: $zipPath..." -ForegroundColor Yellow
 if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
     & tar.exe -a -c -f $zipPath -C $publishRoot .
@@ -180,7 +290,18 @@ if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
 }
 Write-Host "Distribution zip created successfully!" -ForegroundColor Green
 
+# Create Distribution RAR if WinRAR is installed
+$winRarExe = "C:\Program Files\WinRAR\Rar.exe"
+if (Test-Path $winRarExe) {
+    Write-Host "Creating distribution RAR at: $rarPath..." -ForegroundColor Yellow
+    & $winRarExe a -r -ep1 -m3 "$rarPath" "$publishRoot\*" | Out-Null
+    Write-Host "Distribution RAR created successfully!" -ForegroundColor Green
+}
+
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host " Packaging completed: $publishRoot" -ForegroundColor Green
 Write-Host " Output Zip: $zipPath" -ForegroundColor Green
+if (Test-Path $rarPath) {
+    Write-Host " Output RAR: $rarPath" -ForegroundColor Green
+}
 Write-Host "==================================================" -ForegroundColor Green

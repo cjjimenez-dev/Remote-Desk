@@ -1,0 +1,65 @@
+version: '3.8'
+
+# ==============================================================================
+# RemoteDesk VPS Deployment (Signaling + coturn STUN/TURN)
+# Run with: docker compose up -d
+# ==============================================================================
+
+services:
+  # 1. RemoteDesk Signaling Server (ASP.NET Core SignalR)
+  signaling:
+    build:
+      context: ../../src
+      dockerfile: RemoteDesk.Server.Signaling/Dockerfile
+    image: remotedesk-signaling:latest
+    container_name: remotedesk-signaling
+    restart: unless-stopped
+    ports:
+      - "${SIGNALING_PORT:-5000}:5000"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
+      - TURN_HOST=${DOMAIN:-${EXTERNAL_IP}}
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_UDP_PORT=${TURN_PORT:-3478}
+      - TURN_TCP_PORT=${TURN_PORT:-3478}
+      - TURN_TLS_PORT=${TURNS_PORT:-5349}
+      - TURN_FALLBACK_PORT=${TURN_FALLBACK_PORT:-443}
+    networks:
+      - remotedesk-net
+
+  # 2. coturn STUN & TURN Relay Server (WebRTC NAT Traversal)
+  coturn:
+    image: instrumentisto/coturn:latest
+    container_name: remotedesk-coturn
+    restart: unless-stopped
+    ports:
+      # STUN / TURN standard listening ports
+      - "${TURN_PORT:-3478}:3478/tcp"
+      - "${TURN_PORT:-3478}:3478/udp"
+      # TURNS (TLS) port
+      - "${TURNS_PORT:-5349}:5349/tcp"
+      # TURNS Fallback port (bypasses restrictive enterprise firewalls)
+      - "${TURN_FALLBACK_PORT:-443}:443/tcp"
+      # Dynamic WebRTC media relay UDP port range
+      - "49152-49252:49152-49252/udp"
+    command:
+      - -n
+      - --log-file=stdout
+      - --realm=${DOMAIN:-${EXTERNAL_IP}}
+      - --listening-port=3478
+      - --tls-listening-port=5349
+      - --alt-listening-port=443
+      - --min-port=49152
+      - --max-port=49252
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --external-ip=${EXTERNAL_IP}
+      - --fingerprint
+      - --no-tls
+      - --no-dtls
+    networks:
+      - remotedesk-net
+
+networks:
+  remotedesk-net:
+    driver: bridge

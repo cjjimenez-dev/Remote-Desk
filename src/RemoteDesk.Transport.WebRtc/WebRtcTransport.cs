@@ -18,11 +18,15 @@ public sealed class WebRtcTransport : ITransport
     private TransportState _state = TransportState.New;
     private ConnectionPath _connectionPath = ConnectionPath.Unknown;
     private readonly ConcurrentDictionary<string, RTCDataChannel> _dataChannels = new();
+    private readonly ConcurrentDictionary<string, bool> _openedChannels = new();
     private readonly ConcurrentDictionary<byte, string> _channelLabelByCode = new();
 
     private readonly List<RTCIceCandidateType> _localCandidateTypes = [];
     private readonly List<RTCIceCandidateType> _remoteCandidateTypes = [];
     private readonly List<string> _remoteCandidateAddresses = [];
+    private readonly List<RTCIceCandidateInit> _pendingRemoteIceCandidates = [];
+    private readonly object _iceCandidateLock = new();
+    private bool _isRemoteDescriptionSet;
 
     // Video reassembly state
     private readonly ConcurrentDictionary<uint, VideoFrameAssembler> _pendingFrames = new();
@@ -115,10 +119,11 @@ public sealed class WebRtcTransport : ITransport
                 }
             }
 
-            // Fallback default STUN if no servers provided
+            // Fallback default Anycast STUN if no servers provided
             if (config.iceServers.Count == 0)
             {
                 config.iceServers.Add(new RTCIceServer { urls = "stun:stun.l.google.com:19302" });
+                config.iceServers.Add(new RTCIceServer { urls = "stun:stun.cloudflare.com:3478" });
             }
         }
 
@@ -144,15 +149,41 @@ public sealed class WebRtcTransport : ITransport
         _peerConnection.onconnectionstatechange += (state) =>
         {
             Logger.Information("PeerConnection state changed: {State}", state);
-            State = state switch
+            switch (state)
             {
-                RTCPeerConnectionState.connecting => TransportState.Connecting,
-                RTCPeerConnectionState.connected => TransportState.Connected,
-                RTCPeerConnectionState.disconnected => TransportState.Disconnected,
-                RTCPeerConnectionState.failed => TransportState.Failed,
-                RTCPeerConnectionState.closed => TransportState.Closed,
-                _ => TransportState.New
-            };
+                case RTCPeerConnectionState.connecting:
+                    if (State != TransportState.Connected)
+                    {
+                        State = TransportState.Connecting;
+                    }
+                    break;
+                case RTCPeerConnectionState.connected:
+                    TryPromoteConnected();
+                    break;
+                case RTCPeerConnectionState.disconnected:
+                    State = TransportState.Disconnected;
+                    break;
+                case RTCPeerConnectionState.failed:
+                    State = TransportState.Failed;
+                    break;
+                case RTCPeerConnectionState.closed:
+                    State = TransportState.Closed;
+                    break;
+            }
+        };
+
+        _peerConnection.oniceconnectionstatechange += (iceState) =>
+        {
+            Logger.Information("PeerConnection ICE state changed: {State}", iceState);
+            if (iceState == RTCIceConnectionState.connected)
+            {
+                TryPromoteConnected();
+            }
+            else if (iceState == RTCIceConnectionState.failed)
+            {
+                Logger.Warning("WebRTC ICE state failed.");
+                State = TransportState.Failed;
+            }
         };
 
         _peerConnection.onicecandidate += (candidate) =>
@@ -254,6 +285,21 @@ public sealed class WebRtcTransport : ITransport
         }
     }
 
+    private void TryPromoteConnected()
+    {
+        if (State == TransportState.Connected) return;
+
+        bool IsChannelReady(string label) =>
+            _dataChannels.TryGetValue(label, out var ch) &&
+            (ch.readyState == RTCDataChannelState.open || _openedChannels.ContainsKey(label));
+
+        if (IsChannelReady("control") && IsChannelReady("video"))
+        {
+            Logger.Information("Required WebRTC data channels (control, video) are open; promoting transport State to Connected.");
+            State = TransportState.Connected;
+        }
+    }
+
     private void RegisterDataChannel(RTCDataChannel channel)
     {
         _dataChannels[channel.label] = channel;
@@ -261,6 +307,8 @@ public sealed class WebRtcTransport : ITransport
         channel.onopen += () =>
         {
             Logger.Information("Data channel opened: {Label}", channel.label);
+            _openedChannels[channel.label] = true;
+            TryPromoteConnected();
         };
 
         channel.onclose += () =>
@@ -278,6 +326,13 @@ public sealed class WebRtcTransport : ITransport
         {
             HandleChannelMessage(channel.label, data);
         };
+
+        // If the remote channel arrived already open (e.g., via ondatachannel), mark and promote immediately
+        if (channel.readyState == RTCDataChannelState.open)
+        {
+            _openedChannels[channel.label] = true;
+            TryPromoteConnected();
+        }
     }
 
     private void HandleChannelMessage(string label, byte[] data)
@@ -360,6 +415,21 @@ public sealed class WebRtcTransport : ITransport
         {
             Logger.Warning("setRemoteDescription returned: {Result}", result);
         }
+
+        List<RTCIceCandidateInit> pending;
+        lock (_iceCandidateLock)
+        {
+            _isRemoteDescriptionSet = true;
+            pending = new List<RTCIceCandidateInit>(_pendingRemoteIceCandidates);
+            _pendingRemoteIceCandidates.Clear();
+        }
+
+        foreach (var cand in pending)
+        {
+            Logger.Debug("Applying buffered ICE candidate: {Candidate}", cand.candidate);
+            _peerConnection.addIceCandidate(cand);
+        }
+
         await Task.CompletedTask;
     }
 
@@ -373,12 +443,31 @@ public sealed class WebRtcTransport : ITransport
             if (!string.IsNullOrEmpty(address)) _remoteCandidateAddresses.Add(address);
         }
 
-        _peerConnection.addIceCandidate(new RTCIceCandidateInit
+        var candidateInit = new RTCIceCandidateInit
         {
             candidate = candidate,
             sdpMid = sdpMid,
             sdpMLineIndex = (ushort)sdpMLineIndex
-        });
+        };
+
+        lock (_iceCandidateLock)
+        {
+            if (!_isRemoteDescriptionSet)
+            {
+                Logger.Debug("Buffering early ICE candidate until remote description is set: {Candidate}", candidate);
+                _pendingRemoteIceCandidates.Add(candidateInit);
+                return;
+            }
+        }
+
+        try
+        {
+            _peerConnection.addIceCandidate(candidateInit);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("Error adding ICE candidate: {Message}", ex.Message);
+        }
     }
 
     private static void ParseCandidateInfo(string candidateStr, out RTCIceCandidateType? type, out string? address)

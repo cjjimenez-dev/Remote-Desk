@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -132,16 +133,24 @@ public sealed class NamedPipeIpcServer : IAsyncDisposable
         var lengthBuffer = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(lengthBuffer, serialized.Length);
 
-        await _sendLock.WaitAsync(ct);
         try
         {
-            await stream.WriteAsync(lengthBuffer, ct);
-            await stream.WriteAsync(serialized, ct);
-            await stream.FlushAsync(ct);
+            await _sendLock.WaitAsync(ct);
+            try
+            {
+                if (!stream.IsConnected) return;
+                await stream.WriteAsync(lengthBuffer, ct);
+                await stream.WriteAsync(serialized, ct);
+                await stream.FlushAsync(ct);
+            }
+            finally
+            {
+                try { _sendLock.Release(); } catch (ObjectDisposedException) { }
+            }
         }
-        finally
+        catch (Exception ex) when (ex is ObjectDisposedException or IOException or OperationCanceledException)
         {
-            try { _sendLock.Release(); } catch (ObjectDisposedException) { }
+            Logger.Debug(ex, "Named pipe stream closed while sending message");
         }
     }
 

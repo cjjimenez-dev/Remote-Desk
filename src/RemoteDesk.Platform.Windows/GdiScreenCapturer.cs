@@ -117,77 +117,116 @@ public sealed partial class GdiScreenCapturer : IScreenCapturer
     {
         var intervalMs = Math.Max(1, 1000 / targetFps);
 
-        while (!token.IsCancellationRequested)
+        nint hDesktopWnd = nint.Zero;
+        nint hDesktopDC = nint.Zero;
+        nint hMemoryDC = nint.Zero;
+        nint hBitmap = nint.Zero;
+        nint hOldBitmap = nint.Zero;
+        nint pBits = nint.Zero;
+        int allocWidth = 0;
+        int allocHeight = 0;
+
+        void CleanupGdiResources()
         {
-            var target = CurrentDisplay;
-            if (target is null)
+            if (hMemoryDC != nint.Zero)
             {
-                Thread.Sleep(500);
-                continue;
+                if (hOldBitmap != nint.Zero) SelectObject(hMemoryDC, hOldBitmap);
+                if (hBitmap != nint.Zero) DeleteObject(hBitmap);
+                DeleteDC(hMemoryDC);
+                hMemoryDC = nint.Zero;
+                hBitmap = nint.Zero;
+                hOldBitmap = nint.Zero;
+                pBits = nint.Zero;
             }
-
-            var width = target.Width;
-            var height = target.Height;
-            var stride = width * 4;
-
-            var hDesktopWnd = GetDesktopWindow();
-            var hDesktopDC = GetWindowDC(hDesktopWnd);
-            var hMemoryDC = CreateCompatibleDC(hDesktopDC);
-
-            var bmi = new BITMAPINFO();
-            bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
-            bmi.bmiHeader.biWidth = width;
-            bmi.bmiHeader.biHeight = -height; // Top-down
-            bmi.bmiHeader.biPlanes = 1;
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = 0; // BI_RGB
-
-            var hBitmap = CreateDIBSection(hMemoryDC, ref bmi, 0, out var pBits, nint.Zero, 0);
-            var hOldBitmap = SelectObject(hMemoryDC, hBitmap);
-
-            try
+            if (hDesktopDC != nint.Zero && hDesktopWnd != nint.Zero)
             {
-                // Capture display rect
-                BitBlt(hMemoryDC, 0, 0, width, height, hDesktopDC, target.X, target.Y, SRCCOPY | CAPTUREBLT);
+                ReleaseDC(hDesktopWnd, hDesktopDC);
+                hDesktopDC = nint.Zero;
+                hDesktopWnd = nint.Zero;
+            }
+            allocWidth = 0;
+            allocHeight = 0;
+        }
 
-                if (pBits != nint.Zero)
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var target = CurrentDisplay;
+                if (target is null)
                 {
-                    var totalBytes = stride * height;
-                    var buffer = new byte[totalBytes];
-                    Marshal.Copy(pBits, buffer, 0, totalBytes);
+                    Thread.Sleep(200);
+                    continue;
+                }
 
-                    var frame = new CapturedFrame(
-                        data: buffer,
-                        width: width,
-                        height: height,
-                        stride: stride,
-                        format: PixelFormat.Bgra32,
-                        timestampTicks: DateTime.UtcNow.Ticks);
+                var width = target.Width;
+                var height = target.Height;
+                var stride = width * 4;
+                var totalBytes = stride * height;
 
-                    FrameCaptured?.Invoke(frame);
+                // Re-initialize GDI surface only if resolution changes or first frame
+                if (width != allocWidth || height != allocHeight || hMemoryDC == nint.Zero)
+                {
+                    CleanupGdiResources();
+
+                    hDesktopWnd = GetDesktopWindow();
+                    hDesktopDC = GetWindowDC(hDesktopWnd);
+                    hMemoryDC = CreateCompatibleDC(hDesktopDC);
+
+                    var bmi = new BITMAPINFO();
+                    bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
+                    bmi.bmiHeader.biWidth = width;
+                    bmi.bmiHeader.biHeight = -height; // Top-down
+                    bmi.bmiHeader.biPlanes = 1;
+                    bmi.bmiHeader.biBitCount = 32;
+                    bmi.bmiHeader.biCompression = 0; // BI_RGB
+
+                    hBitmap = CreateDIBSection(hMemoryDC, ref bmi, 0, out pBits, nint.Zero, 0);
+                    hOldBitmap = SelectObject(hMemoryDC, hBitmap);
+
+                    allocWidth = width;
+                    allocHeight = height;
+                }
+
+                try
+                {
+                    BitBlt(hMemoryDC, 0, 0, width, height, hDesktopDC, target.X, target.Y, SRCCOPY | CAPTUREBLT);
+
+                    if (pBits != nint.Zero)
+                    {
+                        var buffer = new byte[totalBytes];
+                        Marshal.Copy(pBits, buffer, 0, totalBytes);
+
+                        var frame = new CapturedFrame(
+                            data: buffer,
+                            width: width,
+                            height: height,
+                            stride: stride,
+                            format: PixelFormat.Bgra32,
+                            timestampTicks: DateTime.UtcNow.Ticks);
+
+                        FrameCaptured?.Invoke(frame);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "GDI screen capture failed.");
+                    ErrorOccurred?.Invoke(ex.Message);
+                }
+
+                try
+                {
+                    Thread.Sleep(intervalMs);
+                }
+                catch
+                {
+                    break;
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "GDI screen capture failed.");
-                ErrorOccurred?.Invoke(ex.Message);
-            }
-            finally
-            {
-                SelectObject(hMemoryDC, hOldBitmap);
-                DeleteObject(hBitmap);
-                DeleteDC(hMemoryDC);
-                ReleaseDC(hDesktopWnd, hDesktopDC);
-            }
-
-            try
-            {
-                Thread.Sleep(intervalMs);
-            }
-            catch
-            {
-                break;
-            }
+        }
+        finally
+        {
+            CleanupGdiResources();
         }
     }
 

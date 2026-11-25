@@ -79,16 +79,7 @@ public sealed class IntegratedServerManager : IAsyncDisposable
 
             _signalingApp.MapGet("/api/ice-servers", (string? deviceId) =>
             {
-                var turnHost = Environment.GetEnvironmentVariable("TURN_HOST") ?? "turn.remotedesk.net";
-                var turnSecret = Environment.GetEnvironmentVariable("TURN_SECRET") ?? "RemoteDesk_Turn_Secret_Key_Change_In_Production_2026!";
-                var udpPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_UDP_PORT"), out var u) ? u : 3478;
-                var tlsPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_TLS_PORT"), out var t) ? t : 5349;
-                var fallbackPort = int.TryParse(Environment.GetEnvironmentVariable("TURN_FALLBACK_PORT"), out var f) ? f : 443;
-
-                var id = string.IsNullOrWhiteSpace(deviceId) ? Guid.NewGuid().ToString("N")[..8] : deviceId;
-                var servers = TurnCredentialGenerator.CreateIceServers(
-                    turnHost, turnSecret, id, TimeSpan.FromHours(24), udpPort, udpPort, tlsPort, fallbackPort);
-
+                var servers = TurnCredentialGenerator.GetConfiguredIceServers(deviceId);
                 return Results.Ok(servers);
             });
 

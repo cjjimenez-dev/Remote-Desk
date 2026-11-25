@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -5,6 +6,15 @@ using System.Text;
 using Serilog;
 
 namespace RemoteDesk.Viewer.Services;
+
+public class LanPeerInfo
+{
+    public string Ip { get; set; } = string.Empty;
+    public int Port { get; set; } = 5000;
+    public string Name { get; set; } = string.Empty;
+    public string DeviceId { get; set; } = string.Empty;
+    public DateTime LastSeen { get; set; } = DateTime.UtcNow;
+}
 
 public sealed class LanDiscoveryService : IDisposable
 {
@@ -17,11 +27,13 @@ public sealed class LanDiscoveryService : IDisposable
     private string _localIp = "127.0.0.1";
     private bool _disposed;
 
-    public event Action<string, int, string>? ServerDiscovered;
+    public ConcurrentDictionary<string, LanPeerInfo> DiscoveredPeers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public event Action<string, int, string, string>? ServerDiscovered;
 
     public string LocalIp => _localIp;
 
-    public void Start(bool isHost, int serverPort, string deviceName)
+    public void Start(bool isHost, int serverPort, string deviceName, string deviceId = "")
     {
         _localIp = GetLocalLanIp();
 
@@ -31,7 +43,7 @@ public sealed class LanDiscoveryService : IDisposable
         // If this machine is running the integrated signaling server, broadcast its presence
         if (isHost)
         {
-            StartBroadcaster(serverPort, deviceName);
+            StartBroadcaster(serverPort, deviceName, deviceId);
         }
     }
 
@@ -63,8 +75,22 @@ public sealed class LanDiscoveryService : IDisposable
                                 if (int.TryParse(parts[2], out var port) && remoteIp != _localIp && !remoteIp.StartsWith("127."))
                                 {
                                     var name = parts[3];
-                                    Logger.Information("Discovered RemoteDesk peer at {RemoteIp}:{Port} ({Name})", remoteIp, port, name);
-                                    ServerDiscovered?.Invoke(remoteIp, port, name);
+                                    var deviceId = parts.Length >= 5 ? parts[4] : string.Empty;
+                                    Logger.Information("Discovered RemoteDesk peer at {RemoteIp}:{Port} ({Name}, ID={DeviceId})", remoteIp, port, name, deviceId);
+                                    
+                                    if (!string.IsNullOrWhiteSpace(deviceId))
+                                    {
+                                        DiscoveredPeers[deviceId] = new LanPeerInfo
+                                        {
+                                            Ip = remoteIp,
+                                            Port = port,
+                                            Name = name,
+                                            DeviceId = deviceId,
+                                            LastSeen = DateTime.UtcNow
+                                        };
+                                    }
+
+                                    ServerDiscovered?.Invoke(remoteIp, port, name, deviceId);
                                 }
                             }
                         }
@@ -87,7 +113,7 @@ public sealed class LanDiscoveryService : IDisposable
         }
     }
 
-    private void StartBroadcaster(int serverPort, string deviceName)
+    private void StartBroadcaster(int serverPort, string deviceName, string deviceId)
     {
         try
         {
@@ -97,7 +123,7 @@ public sealed class LanDiscoveryService : IDisposable
             _ = Task.Run(async () =>
             {
                 var broadcastEp = new IPEndPoint(IPAddress.Broadcast, DiscoveryPort);
-                var payload = Encoding.UTF8.GetBytes($"REMOTEDESK|{_localIp}|{serverPort}|{deviceName}");
+                var payload = Encoding.UTF8.GetBytes($"REMOTEDESK|{_localIp}|{serverPort}|{deviceName}|{deviceId}");
 
                 while (!_cts.Token.IsCancellationRequested)
                 {

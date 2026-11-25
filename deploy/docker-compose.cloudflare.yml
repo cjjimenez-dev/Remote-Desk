@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # RemoteDesk Signaling Server
+  signaling:
+    build:
+      context: ../src/RemoteDesk.Server.Signaling
+      dockerfile: Dockerfile
+    container_name: remotedesk-signaling
+    ports:
+      - "5000:5000"
+    environment:
+      - TURN_HOST=turn-${TUNNEL_NAME}.trycloudflare.com
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_UDP_PORT=3478
+      - TURN_TCP_PORT=3478
+      - TURN_TLS_PORT=5349
+      - TURN_FALLBACK_PORT=443
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
+    restart: unless-stopped
+    networks:
+      - remotedesk-net
+
+  # coturn TURN/STUN Server
+  coturn:
+    image: instrumentisto/coturn:latest
+    container_name: remotedesk-coturn
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "443:443/tcp"
+    environment:
+      - REALM=${TUNNEL_NAME}.trycloudflare.com
+      - AUTH_SECRET=${TURN_SECRET}
+      - LISTENING_PORT=3478
+      - TLS_LISTENING_PORT=5349
+      - ALT_LISTENING_PORT=443
+      - MIN_PORT=49152
+      - MAX_PORT=65535
+      - EXTERNAL_IP=${EXTERNAL_IP}  # Optional: your public IP
+    # For TLS certs (mount Let's Encrypt certs or generate self-signed)
+    volumes:
+      - ./certs:/etc/coturn/certs:ro
+    command: >
+      -v
+      -r ${TUNNEL_NAME}.trycloudflare.com
+      -a
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET}
+      --realm=${TUNNEL_NAME}.trycloudflare.com
+      --listening-port=3478
+      --tls-listening-port=5349
+      --alt-listening-port=443
+      --min-port=49152
+      --max-port=65535
+      --cert=/etc/coturn/certs/fullchain.pem
+      --pkey=/etc/coturn/certs/privkey.pem
+      --no-dtls
+      --no-tls  # Disable if no certs, enable with certs
+    restart: unless-stopped
+    networks:
+      - remotedesk-net
+
+networks:
+  remotedesk-net:
+    driver: bridge

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using RemoteDesk.Core.Models;
 using Serilog;
 using SIPSorceryMedia.Abstractions;
@@ -12,8 +13,8 @@ public sealed class FFmpegH264Encoder : RemoteDesk.Core.Interfaces.IVideoEncoder
     private FFmpegVideoEncoder? _encoder;
     private int _width;
     private int _height;
-    private int _targetFps;
-    private int _bitrateKbps;
+    private int _targetFps = 30;
+    private int _bitrateKbps = 2500;
     private bool _requestKeyFrameNext;
     private readonly object _lock = new();
 
@@ -28,15 +29,17 @@ public sealed class FFmpegH264Encoder : RemoteDesk.Core.Interfaces.IVideoEncoder
         {
             _width = width;
             _height = height;
-            _targetFps = targetFps;
-            _bitrateKbps = bitrateKbps;
+            _targetFps = targetFps > 0 ? targetFps : 30;
+            _bitrateKbps = bitrateKbps > 0 ? bitrateKbps : 2500;
 
             _encoder?.Dispose();
             _encoder = new FFmpegVideoEncoder();
 
-            var bitrateBps = bitrateKbps * 1000;
+            var bitrateBps = _bitrateKbps * 1000;
             _encoder.SetBitrate(bitrateBps, bitrateBps / 2, bitrateBps / 4, bitrateBps * 2);
-            _encoder.SetThreadCount(Environment.ProcessorCount);
+            // Cap encoder thread count to avoid saturating CPU and freezing UI
+            var safeThreads = Math.Max(1, Math.Min(4, Environment.ProcessorCount / 2));
+            _encoder.SetThreadCount(safeThreads);
             _requestKeyFrameNext = true;
         }
     }
@@ -58,10 +61,20 @@ public sealed class FFmpegH264Encoder : RemoteDesk.Core.Interfaces.IVideoEncoder
 
             try
             {
+                byte[] rawBytes;
+                if (MemoryMarshal.TryGetArray(frame.Data, out var seg) && seg.Array != null && seg.Offset == 0 && seg.Count == seg.Array.Length)
+                {
+                    rawBytes = seg.Array;
+                }
+                else
+                {
+                    rawBytes = frame.Data.ToArray();
+                }
+
                 var encodedBytes = _encoder!.EncodeVideo(
                     frame.Width,
                     frame.Height,
-                    frame.Data.ToArray(),
+                    rawBytes,
                     VideoPixelFormatsEnum.Bgra,
                     VideoCodecsEnum.H264);
 
