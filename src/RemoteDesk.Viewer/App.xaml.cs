@@ -32,6 +32,7 @@ public partial class App : Application
     {
         base.OnExit(e);
         Log.CloseAndFlush();
+        Environment.Exit(e.ApplicationExitCode);
     }
 
     private sealed class DailyFileLogSink : ILogEventSink

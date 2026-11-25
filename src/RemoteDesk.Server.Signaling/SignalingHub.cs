@@ -12,6 +12,7 @@ public sealed class SignalingHub : Hub
 
     private static readonly ConcurrentDictionary<string, SignalingHostInfo> HostsById = new();
     private static readonly ConcurrentDictionary<string, string> HostIdByConnectionId = new();
+    private static readonly ConcurrentDictionary<string, string> PendingHostConnByViewerConnId = new();
 
     public Task<bool> RegisterHost(string hostId, string deviceName, byte[]? publicKey = null)
     {
@@ -66,6 +67,7 @@ public sealed class SignalingHub : Hub
         }
 
         var sessionId = Guid.NewGuid().ToString("N")[..8];
+        PendingHostConnByViewerConnId[viewerConnectionId] = hostInfo.ConnectionId;
         Logger.Information("Connection request: Session=[{SessionId}], Viewer=[{ViewerName} ({ViewerConn})], DeviceId=[{DeviceId}] -> Host=[{HostId}]",
             sessionId, viewerName, viewerConnectionId, viewerDeviceId, targetHostId);
 
@@ -73,13 +75,14 @@ public sealed class SignalingHub : Hub
             sessionId, viewerConnectionId, viewerName, viewerDeviceId, viewerPublicKey, requestSignature, timestamp);
     }
 
-    public async Task AcceptConnection(string viewerConnectionId, string sessionId)
+    public Task AcceptConnection(string viewerConnectionId, string sessionId)
     {
-        await AcceptConnectionWithPermissions(viewerConnectionId, sessionId, (int)SessionPermissions.All, Context.ConnectionId);
+        return AcceptConnectionWithPermissions(viewerConnectionId, sessionId, (int)SessionPermissions.All, Context.ConnectionId);
     }
 
     public async Task AcceptConnectionWithPermissions(string viewerConnectionId, string sessionId, int permissions, string hostDeviceId)
     {
+        PendingHostConnByViewerConnId.TryRemove(viewerConnectionId, out _);
         var hostConnectionId = Context.ConnectionId;
         Logger.Information("Connection accepted: Session=[{SessionId}] for Viewer=[{ViewerConn}], Perms=[{Permissions}]",
             sessionId, viewerConnectionId, (SessionPermissions)permissions);
@@ -89,8 +92,27 @@ public sealed class SignalingHub : Hub
 
     public async Task RejectConnection(string viewerConnectionId, string reason)
     {
+        PendingHostConnByViewerConnId.TryRemove(viewerConnectionId, out _);
         Logger.Information("Connection rejected for Viewer=[{ViewerConn}]: {Reason}", viewerConnectionId, reason);
         await Clients.Client(viewerConnectionId).SendAsync("ConnectionRejected", reason);
+    }
+
+    public async Task CancelConnection()
+    {
+        var viewerConnectionId = Context.ConnectionId;
+        if (PendingHostConnByViewerConnId.TryRemove(viewerConnectionId, out var hostConnectionId))
+        {
+            Logger.Information("Connection request cancelled by Viewer=[{ViewerConn}] for HostConn=[{HostConn}]",
+                viewerConnectionId, hostConnectionId);
+            await Clients.Client(hostConnectionId).SendAsync("ConnectionCancelled", viewerConnectionId);
+        }
+    }
+
+    public async Task NotifySessionEnded(string targetConnectionId, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(targetConnectionId)) return;
+        Logger.Information("Relaying session end: [{From}] -> [{To}]: {Reason}", Context.ConnectionId, targetConnectionId, reason);
+        await Clients.Client(targetConnectionId).SendAsync("SessionEndedByPeer", reason);
     }
 
     public async Task SendOffer(string targetConnectionId, string sdp)
@@ -139,7 +161,7 @@ public sealed class SignalingHub : Hub
         await Clients.Client(targetConnectionId).SendAsync("IceCandidateReceived", Context.ConnectionId, candidate, sdpMid, sdpMLineIndex);
     }
 
-    public override Task OnDisconnectedAsync(Exception? exception)
+    public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var connectionId = Context.ConnectionId;
         if (HostIdByConnectionId.TryRemove(connectionId, out var hostId))
@@ -148,6 +170,13 @@ public sealed class SignalingHub : Hub
             Logger.Information("Host disconnected: ID=[{HostId}], Connection=[{ConnId}]", hostId, connectionId);
         }
 
-        return base.OnDisconnectedAsync(exception);
+        if (PendingHostConnByViewerConnId.TryRemove(connectionId, out var hostConnectionId))
+        {
+            Logger.Information("Pending viewer disconnected before acceptance: Viewer=[{ViewerConn}] -> HostConn=[{HostConn}]",
+                connectionId, hostConnectionId);
+            await Clients.Client(hostConnectionId).SendAsync("ConnectionCancelled", connectionId);
+        }
+
+        await base.OnDisconnectedAsync(exception);
     }
 }

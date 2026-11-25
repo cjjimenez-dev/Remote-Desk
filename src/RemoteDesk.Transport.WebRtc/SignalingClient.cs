@@ -18,6 +18,8 @@ public sealed class SignalingClient : IAsyncDisposable
     public event Action<SignalingConnectionRequest>? ConnectionRequested;
     public event Action<SignalingConnectionResponse>? ConnectionAccepted;
     public event Action<string>? ConnectionRejected;
+    public event Action<string>? ConnectionCancelled;
+    public event Action<string>? SessionEndedByPeer;
     public event Action<SignalingSdpMessage>? OfferReceived;
     public event Action<SignalingSdpMessage>? AnswerReceived;
     public event Action<SignalingIceCandidateMessage>? IceCandidateReceived;
@@ -99,6 +101,16 @@ public sealed class SignalingClient : IAsyncDisposable
         _hub.On<string>("ConnectionRejected", reason =>
         {
             ConnectionRejected?.Invoke(reason);
+        });
+
+        _hub.On<string>("ConnectionCancelled", viewerConnId =>
+        {
+            ConnectionCancelled?.Invoke(viewerConnId);
+        });
+
+        _hub.On<string>("SessionEndedByPeer", reason =>
+        {
+            SessionEndedByPeer?.Invoke(reason);
         });
 
         _hub.On<string, string, string, string, byte[]?, string, byte[]?, long>(
@@ -201,6 +213,18 @@ public sealed class SignalingClient : IAsyncDisposable
     {
         if (_hub is null) throw new InvalidOperationException("Not connected to signaling server.");
         await _hub.SendAsync("RejectConnection", viewerConnectionId, reason, ct);
+    }
+
+    public async Task CancelConnectionAsync(CancellationToken ct = default)
+    {
+        if (_hub is null || _hub.State != HubConnectionState.Connected) return;
+        await _hub.SendAsync("CancelConnection", ct);
+    }
+
+    public async Task NotifySessionEndedAsync(string targetConnectionId, string reason, CancellationToken ct = default)
+    {
+        if (_hub is null || _hub.State != HubConnectionState.Connected || string.IsNullOrWhiteSpace(targetConnectionId)) return;
+        await _hub.SendAsync("NotifySessionEnded", targetConnectionId, reason, ct);
     }
 
     public Task SendOfferAsync(string targetConnectionId, string sdp, CancellationToken ct = default)

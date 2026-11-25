@@ -295,6 +295,17 @@
                        MouseMove="OnVideoMouseMove"
                        MouseWheel="OnVideoMouseWheel"/>
 
+                <!-- Waiting for First Remote Frame Placeholder (Avoids blank white canvas before video renders) -->
+                <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderCardBrush}" BorderThickness="1"
+                        CornerRadius="12" Padding="28,20" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{Binding IsWaitingForVideoFrame, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                        IsHitTestVisible="False">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="🎥 Waiting for remote desktop stream..." FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Encrypted channel established. Initializing display capture on partner..." FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- Drag and Drop File Transfer Visual Target Overlay -->
                 <Border Background="#E6090D16" BorderBrush="#38BDF8" BorderThickness="2"
                         CornerRadius="14" Margin="30" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="40,28"
@@ -899,6 +910,85 @@
                             <TextBlock Text="{Binding FleetDevices.Count, StringFormat='Total devices matching filter: {0}'}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" VerticalAlignment="Center"/>
                         </DockPanel>
                     </Grid>
+                </Border>
+            </Border>
+
+            <!-- Connection Progress & Declined Status Modal Overlay (Emil Design) -->
+            <Border Grid.ColumnSpan="2" Background="{DynamicResource ModalBackdropBrush}"
+                    Visibility="{Binding IsConnectionModalOpen, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <Border Width="440" VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Background="{DynamicResource SurfaceElevatedBrush}" BorderBrush="{DynamicResource BorderCardBrush}" BorderThickness="1"
+                        CornerRadius="12" Padding="24">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="32" ShadowDepth="4" Color="#000000" Opacity="0.22"/>
+                    </Border.Effect>
+                    <StackPanel>
+                        <!-- Modal Header -->
+                        <DockPanel LastChildFill="True" Margin="0,0,0,14">
+                            <Button DockPanel.Dock="Right" Command="{Binding DismissConnectionModalCommand}"
+                                    Content="✕" Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}"
+                                    BorderThickness="0" FontWeight="Bold" FontSize="14" Cursor="Hand" VerticalAlignment="Top"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource InsetBgBrush}"
+                                        BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" Margin="0,0,12,0">
+                                    <TextBlock Text="{Binding ConnectionModalIcon}" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding ConnectionModalTitle}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock Text="{Binding ConnectionModalSubtitle}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Target Partner Address Pill -->
+                        <Border Background="{DynamicResource InsetBgBrush}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="12,8" Margin="0,0,0,14">
+                            <DockPanel LastChildFill="True">
+                                <Border DockPanel.Dock="Right" Background="{DynamicResource BrandSkyBgBrush}" BorderBrush="{DynamicResource BrandSkyBorderBrush}"
+                                        BorderThickness="1" CornerRadius="4" Padding="8,2" VerticalAlignment="Center"
+                                        Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}">
+                                    <TextBlock Text="Connecting..." FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrandSkyTextBrush}"/>
+                                </Border>
+                                <Border DockPanel.Dock="Right" Background="#1FEF4444" BorderBrush="{DynamicResource BrandRedBorderBrush}"
+                                        BorderThickness="1" CornerRadius="4" Padding="8,2" VerticalAlignment="Center"
+                                        Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+                                    <TextBlock Text="Not Connected" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource BrandRedBrush}"/>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="PARTNER ADDRESS" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource TextMutedBrush}"/>
+                                    <TextBlock Text="{Binding ConnectionModalTargetId}" FontFamily="Cascadia Code, Consolas" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- Indeterminate Progress Indicator (Visible while waiting / negotiating) -->
+                        <StackPanel Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}" Margin="0,0,0,18">
+                            <ProgressBar IsIndeterminate="True" Height="5" Foreground="{DynamicResource BrandSkyBrush}" Background="{DynamicResource InsetBgBrush}" BorderThickness="0" Margin="0,0,0,10"/>
+                            <TextBlock Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <!-- Declined / Error Reason Banner (Visible on reject / offline / failure) -->
+                        <Border Background="#18EF4444" BorderBrush="{DynamicResource BrandRedBorderBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="12,10" Margin="0,0,0,18"
+                                Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
+                            <TextBlock Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}" TextWrapping="Wrap"/>
+                        </Border>
+
+                        <!-- Modal Footer Actions -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Command="{Binding CancelConnectionAttemptCommand}"
+                                    Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}"
+                                    Content="Cancel Request" Style="{DynamicResource AnyDeskRedButton}" Height="32" Padding="16,0"/>
+
+                            <Button Command="{Binding DismissConnectionModalCommand}"
+                                    Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                                    Content="Close" Style="{DynamicResource EmilHeaderButton}" Height="32" Padding="14,0" Margin="0,0,8,0"/>
+                            <Button Command="{Binding RetryConnectionModalCommand}"
+                                    Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
+                                    Content="Try Again" Style="{DynamicResource EmilConnectButton}" Height="32" Padding="16,0"/>
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
             </Border>
         </Grid>

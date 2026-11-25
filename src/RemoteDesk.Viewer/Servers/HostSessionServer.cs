@@ -43,6 +43,7 @@ public sealed class HostSessionServer : IAsyncDisposable
 
     public event Action<string, string>? IncomingConnectionPrompt;
     public event Action<string, string>? IncomingSessionStarting;
+    public event Action? IncomingConnectionCancelled;
     public event Action? SessionStarted;
     public event Action? SessionEnded;
     public event Action? StatusChanged;
@@ -79,6 +80,7 @@ public sealed class HostSessionServer : IAsyncDisposable
             _signalingClient = new SignalingClient(_signalingUrl);
 
             _signalingClient.ConnectionRequested += HandleConnectionRequested;
+            _signalingClient.ConnectionCancelled += HandleConnectionCancelled;
             _signalingClient.OfferReceived += HandleOfferReceived;
             _signalingClient.IceCandidateReceived += HandleIceCandidateReceived;
 
@@ -237,7 +239,30 @@ public sealed class HostSessionServer : IAsyncDisposable
 
         if (viewerConnId != null && _signalingClient != null)
         {
-            await _signalingClient.RejectConnectionAsync(viewerConnId, reason).ConfigureAwait(false);
+            try
+            {
+                await _signalingClient.RejectConnectionAsync(viewerConnId, reason).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "Failed to send connection rejection to viewer [{ViewerConn}].", viewerConnId);
+            }
+        }
+    }
+
+    private void HandleConnectionCancelled(string viewerConnId)
+    {
+        bool shouldClear;
+        lock (_sessionLock)
+        {
+            shouldClear = _activeViewerConnId == viewerConnId;
+        }
+
+        if (shouldClear)
+        {
+            Logger.Information("Viewer [{ViewerConn}] cancelled pending connection request.", viewerConnId);
+            CloseSession(notifyPeer: false);
+            IncomingConnectionCancelled?.Invoke();
         }
     }
 
@@ -418,10 +443,15 @@ public sealed class HostSessionServer : IAsyncDisposable
         }
     }
 
-    public void CloseSession()
+    public void CloseSession(bool notifyPeer = true)
     {
+        string? viewerConnIdToNotify = null;
+        WebRtcTransport? transportToDispose = null;
+
         lock (_sessionLock)
         {
+            viewerConnIdToNotify = notifyPeer ? _activeViewerConnId : null;
+
             _capturer?.Stop();
             _capturer?.Dispose();
             _capturer = null;
@@ -440,7 +470,7 @@ public sealed class HostSessionServer : IAsyncDisposable
 
             if (_activeTransport != null)
             {
-                try { _ = _activeTransport.DisposeAsync(); } catch { }
+                transportToDispose = _activeTransport;
                 _activeTransport = null;
             }
 
@@ -448,6 +478,27 @@ public sealed class HostSessionServer : IAsyncDisposable
             _activeViewerDeviceId = null;
             _activeViewerName = null;
             _activeSessionId = null;
+        }
+
+        if (transportToDispose != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await transportToDispose.DisposeAsync().ConfigureAwait(false); } catch { }
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(viewerConnIdToNotify) && _signalingClient != null)
+        {
+            var signaling = _signalingClient;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await signaling.NotifySessionEndedAsync(viewerConnIdToNotify, "Remote partner ended the session.").ConfigureAwait(false);
+                }
+                catch { }
+            });
         }
 
         SessionEnded?.Invoke();

@@ -72,6 +72,9 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private WriteableBitmap? _videoImage;
 
+    private CancellationTokenSource? _negotiationCts;
+    private long _connectionAttemptId;
+
     [ObservableProperty]
     private bool _isLoopbackActive;
 
@@ -81,7 +84,32 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isConnecting;
 
+    [ObservableProperty]
+    private bool _isConnectionModalOpen;
+
+    [ObservableProperty]
+    private bool _isConnectionModalError;
+
+    [ObservableProperty]
+    private string _connectionModalIcon = "📡";
+
+    [ObservableProperty]
+    private string _connectionModalTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _connectionModalSubtitle = string.Empty;
+
+    [ObservableProperty]
+    private string _connectionModalTargetId = string.Empty;
+
+    [ObservableProperty]
+    private string _connectionModalStageText = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasReceivedVideoFrame;
+
     public bool IsSessionActive => IsLoopbackActive || IsRemoteSessionActive;
+    public bool IsWaitingForVideoFrame => IsSessionActive && !HasReceivedVideoFrame;
 
     [ObservableProperty]
     private bool _isInputEnabled = true;
@@ -481,6 +509,10 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             {
                 VideoImage = _renderer.BitmapSource;
             }
+            if (!HasReceivedVideoFrame)
+            {
+                HasReceivedVideoFrame = true;
+            }
         };
 
         _statsTimer = new DispatcherTimer
@@ -526,11 +558,18 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
     partial void OnIsLoopbackActiveChanged(bool value)
     {
         OnPropertyChanged(nameof(IsSessionActive));
+        OnPropertyChanged(nameof(IsWaitingForVideoFrame));
     }
 
     partial void OnIsRemoteSessionActiveChanged(bool value)
     {
         OnPropertyChanged(nameof(IsSessionActive));
+        OnPropertyChanged(nameof(IsWaitingForVideoFrame));
+    }
+
+    partial void OnHasReceivedVideoFrameChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsWaitingForVideoFrame));
     }
 
     private void LoadDisplays()
@@ -627,7 +666,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             }
         }
 
+        var attemptId = Interlocked.Increment(ref _connectionAttemptId);
+
         IsConnecting = true;
+        IsConnectionModalError = false;
+        IsConnectionModalOpen = true;
+        ConnectionModalIcon = "📡";
+        ConnectionModalTargetId = cleanTargetId;
+        ConnectionModalTitle = $"Connecting to {cleanTargetId}";
+        ConnectionModalSubtitle = $"Server: {outgoingServerDisplay}";
+        ConnectionModalStageText = "Connecting to signaling server...";
         StatusText = $"Connecting to [{cleanTargetId}]...";
 
         try
@@ -639,47 +687,80 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             _signalingClient.ConnectionRejected += reason =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(() =>
                 {
-                    if (reason.Contains("offline or ID does not exist", StringComparison.OrdinalIgnoreCase))
+                    if (attemptId != _connectionAttemptId) return;
+
+                    var isOffline = reason.Contains("offline or ID does not exist", StringComparison.OrdinalIgnoreCase);
+                    var friendlyMsg = isOffline
+                        ? $"Partner [{cleanTargetId}] not found on server ({outgoingServerDisplay}). Check Partner ID or Internet ID."
+                        : $"Partner [{cleanTargetId}] declined your connection request. ({reason})";
+
+                    ShowConnectionFailureModal(
+                        isOffline ? "Partner Not Reachable" : "Connection Declined",
+                        $"Server: {outgoingServerDisplay}",
+                        friendlyMsg,
+                        isOffline ? "⚠️" : "🚫");
+                    DisconnectRemoteCore(friendlyMsg, keepModalOpen: true);
+                });
+            };
+
+            _signalingClient.SessionEndedByPeer += reason =>
+            {
+                _dispatcher.BeginInvoke(() =>
+                {
+                    if (attemptId != _connectionAttemptId) return;
+
+                    var msg = string.IsNullOrWhiteSpace(reason) ? $"Partner [{cleanTargetId}] ended the session." : reason;
+                    if (IsConnecting && !IsRemoteSessionActive)
                     {
-                        StatusText = $"❌ Partner [{cleanTargetId}] not found on server ({outgoingServerDisplay}). Check partner ID or Internet ID.";
+                        ShowConnectionFailureModal("Connection Declined", $"Partner: {cleanTargetId}", msg, "🚫");
+                        DisconnectRemoteCore(msg, keepModalOpen: true);
                     }
                     else
                     {
-                        StatusText = $"Connection rejected: {reason}";
+                        DisconnectRemoteCore(msg, keepModalOpen: false);
                     }
-                    DisconnectRemote();
                 });
             };
 
             _signalingClient.ConnectionAccepted += async res =>
             {
+                if (attemptId != _connectionAttemptId) return;
+
                 _activeHostConnId = res.HostConnectionId;
                 _activeSessionId = res.SessionId;
                 _activeHostDeviceId = res.HostDeviceId;
                 _grantedPermissions = res.GrantedPermissions;
 
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(() =>
                 {
+                    if (attemptId != _connectionAttemptId) return;
                     GrantedPermissionsText = _grantedPermissions.ToString();
+                    ConnectionModalIcon = "🔐";
+                    ConnectionModalTitle = $"Connecting to {res.HostDeviceId}";
+                    ConnectionModalStageText = "Partner accepted! Establishing encrypted WebRTC P2P tunnel...";
                     StatusText = $"Host [{res.HostDeviceId}] accepted connection [{res.SessionId}]. Negotiating WebRTC...";
                 });
 
                 // WebRTC negotiation watchdog: prevent infinite hanging if ICE/STUN/Relay fails
+                _negotiationCts?.Cancel();
+                _negotiationCts?.Dispose();
                 var negotiationCts = new CancellationTokenSource();
+                _negotiationCts = negotiationCts;
                 _ = Task.Run(async () =>
                 {
                     try
                     {
                         await Task.Delay(TimeSpan.FromSeconds(25), negotiationCts.Token);
-                        _dispatcher.Invoke(() =>
+                        _ = _dispatcher.BeginInvoke(() =>
                         {
-                            if (IsConnecting && !IsRemoteSessionActive)
+                            if (attemptId == _connectionAttemptId && IsConnecting && !IsRemoteSessionActive)
                             {
                                 Logger.Warning("WebRTC negotiation timed out after 25s.");
-                                StatusText = $"❌ WebRTC negotiation timed out with [{cleanTargetId}]. (Ensure Force Relay is OFF and both devices are reachable).";
-                                DisconnectRemote();
+                                var timeoutMsg = $"WebRTC negotiation timed out with [{cleanTargetId}]. Ensure Force Relay is OFF and both devices are reachable.";
+                                ShowConnectionFailureModal("Connection Timed Out", $"Partner: {cleanTargetId}", timeoutMsg, "⏱️");
+                                DisconnectRemoteCore(timeoutMsg, keepModalOpen: true);
                             }
                         });
                     }
@@ -705,8 +786,10 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
                     _transport.ConnectionPathChanged += path =>
                     {
-                        _dispatcher.Invoke(() =>
+                        _dispatcher.BeginInvoke(() =>
                         {
+                            if (attemptId != _connectionAttemptId) return;
+
                             ConnectionPath = path;
                             switch (path)
                             {
@@ -727,13 +810,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                                     ConnectionPathColor = "#6B7280";
                                     break;
                             }
-                            StatusText = $"Connected to [{cleanTargetId}] via WebRTC ({ConnectionPathBadge})";
+                            if (IsRemoteSessionActive)
+                            {
+                                StatusText = $"Connected to [{cleanTargetId}] via WebRTC ({ConnectionPathBadge})";
+                            }
                         });
                     };
 
                     _transport.IceCandidateGenerated += (candidate, mid, line) =>
                     {
-                        if (_signalingClient != null && _activeHostConnId != null)
+                        if (attemptId == _connectionAttemptId && _signalingClient != null && _activeHostConnId != null)
                         {
                             _ = _signalingClient.SendIceCandidateAsync(_activeHostConnId, candidate, mid, line);
                         }
@@ -741,12 +827,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
                     _transport.StateChanged += state =>
                     {
-                        _dispatcher.Invoke(() =>
+                        _dispatcher.BeginInvoke(() =>
                         {
+                            if (attemptId != _connectionAttemptId) return;
+
                             Logger.Information("Remote WebRTC state: {State}", state);
                             if (state == TransportState.Connected)
                             {
                                 try { negotiationCts.Cancel(); } catch { }
+                                IsConnectionModalOpen = false;
+                                IsConnectionModalError = false;
                                 IsRemoteSessionActive = true;
                                 IsConnecting = false;
                                 IsInputEnabled = _grantedPermissions.HasFlag(SessionPermissions.Control);
@@ -871,8 +961,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                             }
                             else if (state is TransportState.Disconnected or TransportState.Failed or TransportState.Closed)
                             {
-                                StatusText = $"Session disconnected ({state}).";
-                                DisconnectRemote();
+                                if (IsConnecting && !IsRemoteSessionActive)
+                                {
+                                    var failMsg = $"P2P connection to [{cleanTargetId}] failed ({state}).";
+                                    ShowConnectionFailureModal("Connection Failed", $"Partner: {cleanTargetId}", failMsg, "⚠️");
+                                    DisconnectRemoteCore(failMsg, keepModalOpen: true);
+                                }
+                                else
+                                {
+                                    DisconnectRemoteCore($"Session disconnected ({state}).", keepModalOpen: false);
+                                }
                             }
                         });
                     };
@@ -949,16 +1047,19 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 catch (Exception ex)
                 {
                     Logger.Error(ex, "Failed to establish WebRTC transport.");
-                    _dispatcher.Invoke(() =>
+                    _ = _dispatcher.BeginInvoke(() =>
                     {
-                        StatusText = $"WebRTC negotiation failed: {ex.Message}";
-                        DisconnectRemote();
+                        if (attemptId != _connectionAttemptId) return;
+                        var msg = $"WebRTC negotiation failed: {ex.Message}";
+                        ShowConnectionFailureModal("WebRTC Failed", $"Partner: {cleanTargetId}", msg, "⚠️");
+                        DisconnectRemoteCore(msg, keepModalOpen: true);
                     });
                 }
             };
 
             _signalingClient.AnswerReceived += async answer =>
             {
+                if (attemptId != _connectionAttemptId) return;
                 if (answer.FromConnectionId == _activeHostConnId && _transport != null)
                 {
                     Logger.Information("Received SDP answer from Host. Verifying DTLS fingerprint signature...");
@@ -966,12 +1067,14 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                     if (answer.DtlsFingerprintSignature == null || answer.SenderPublicKey == null)
                     {
                         Logger.Error("SECURITY ALERT: Host SDP Answer is unsigned! Possible MITM downgrade attack.");
-                        _dispatcher.Invoke(() =>
+                        _ = _dispatcher.BeginInvoke(() =>
                         {
-                            StatusText = "SECURITY ALERT: Unsigned SDP Answer rejected.";
+                            if (attemptId != _connectionAttemptId) return;
                             SecurityStatusBadge = "⚠️ Unsigned SDP Rejected";
                             SecurityStatusColor = "#EF4444";
-                            DisconnectRemote();
+                            var msg = "SECURITY ALERT: Unsigned SDP Answer rejected.";
+                            ShowConnectionFailureModal("Security Check Failed", $"Partner: {cleanTargetId}", msg, "⚠️");
+                            DisconnectRemoteCore(msg, keepModalOpen: true);
                         });
                         return;
                     }
@@ -989,19 +1092,22 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                     if (!valid)
                     {
                         Logger.Error("SECURITY ALERT: Host SDP Answer DTLS fingerprint signature mismatch or expired! Possible MITM tampering.");
-                        _dispatcher.Invoke(() =>
+                        _ = _dispatcher.BeginInvoke(() =>
                         {
-                            StatusText = "SECURITY ALERT: SDP Answer DTLS fingerprint signature mismatch! Session aborted.";
+                            if (attemptId != _connectionAttemptId) return;
                             SecurityStatusBadge = "⚠️ MITM Tampering Detected";
                             SecurityStatusColor = "#EF4444";
-                            DisconnectRemote();
+                            var msg = "SECURITY ALERT: SDP Answer DTLS fingerprint signature mismatch! Session aborted.";
+                            ShowConnectionFailureModal("Security Verification Failed", $"Partner: {cleanTargetId}", msg, "⚠️");
+                            DisconnectRemoteCore(msg, keepModalOpen: true);
                         });
                         return;
                     }
 
                     Logger.Information(">>> Host DTLS Fingerprint signature successfully verified against Host ECDSA public key!");
-                    _dispatcher.Invoke(() =>
+                    _ = _dispatcher.BeginInvoke(() =>
                     {
+                        if (attemptId != _connectionAttemptId) return;
                         SecurityStatusBadge = "🔒 Verified E2EE (ECDSA)";
                         SecurityStatusColor = "#10B981";
                     });
@@ -1012,13 +1118,16 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             _signalingClient.IceCandidateReceived += ice =>
             {
-                if (ice.FromConnectionId == _activeHostConnId && _transport != null)
+                if (attemptId == _connectionAttemptId && ice.FromConnectionId == _activeHostConnId && _transport != null)
                 {
                     _transport.AddIceCandidate(ice.Candidate, ice.SdpMid, (ushort)ice.SdpMLineIndex);
                 }
             };
 
             await _signalingClient.ConnectAsync();
+            if (attemptId != _connectionAttemptId) return;
+
+            ConnectionModalStageText = $"Waiting for partner [{cleanTargetId}] to accept...";
             StatusText = $"Requesting authenticated session with Host [{cleanTargetId}]...";
 
             // Sign connection request with Viewer DeviceIdentity
@@ -1037,34 +1146,94 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to connect to host.");
+            if (attemptId != _connectionAttemptId) return;
+
+            string msg;
             if (ex is System.Net.Http.HttpRequestException || ex.Message.Contains("refused") || ex.Message.Contains("actively refused"))
             {
-                StatusText = $"❌ Cannot reach server at {outgoingSignalingUrl}. Check domain, internet connection, or firewall!";
+                msg = $"Cannot reach server at {outgoingSignalingUrl}. Check domain, internet connection, or firewall.";
             }
             else
             {
-                StatusText = $"Connection failed: {ex.Message}";
+                msg = $"Connection failed: {ex.Message}";
             }
-            DisconnectRemote();
+            ShowConnectionFailureModal("Connection Failed", $"Server: {outgoingServerDisplay}", msg, "⚠️");
+            DisconnectRemoteCore(msg, keepModalOpen: true);
         }
+    }
+
+    private void ShowConnectionFailureModal(string title, string subtitle, string message, string icon)
+    {
+        IsConnectionModalOpen = true;
+        IsConnectionModalError = true;
+        ConnectionModalIcon = icon;
+        ConnectionModalTitle = title;
+        ConnectionModalSubtitle = subtitle;
+        ConnectionModalStageText = message;
+    }
+
+    [RelayCommand]
+    private void CancelConnectionAttempt()
+    {
+        var signaling = _signalingClient;
+        if (signaling != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await signaling.CancelConnectionAsync().ConfigureAwait(false); } catch { }
+            });
+        }
+
+        DisconnectRemoteCore("Connection cancelled.", keepModalOpen: false);
+    }
+
+    [RelayCommand]
+    private void DismissConnectionModal()
+    {
+        if (IsConnecting && !IsRemoteSessionActive)
+        {
+            CancelConnectionAttempt();
+            return;
+        }
+
+        IsConnectionModalOpen = false;
+        IsConnectionModalError = false;
+    }
+
+    [RelayCommand]
+    private async Task RetryConnectionModalAsync()
+    {
+        IsConnectionModalOpen = false;
+        IsConnectionModalError = false;
+        await ConnectRemoteAsync();
     }
 
     [RelayCommand]
     private void DisconnectRemote()
     {
+        if (IsConnecting && !IsRemoteSessionActive)
+        {
+            CancelConnectionAttempt();
+            return;
+        }
+
+        DisconnectRemoteCore();
+    }
+
+    private void DisconnectRemoteCore(string? statusMessage = null, bool keepModalOpen = false)
+    {
+        Interlocked.Increment(ref _connectionAttemptId);
         _statsTimer.Stop();
 
-        if (_transport != null)
-        {
-            _transport.CloseAsync().GetAwaiter().GetResult();
-            _transport = null;
-        }
+        try { _negotiationCts?.Cancel(); } catch { }
+        try { _negotiationCts?.Dispose(); } catch { }
+        _negotiationCts = null;
 
-        if (_signalingClient != null)
-        {
-            _signalingClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _signalingClient = null;
-        }
+        var transport = _transport;
+        _transport = null;
+
+        var signaling = _signalingClient;
+        _signalingClient = null;
 
         _decoder?.Dispose();
         _decoder = null;
@@ -1075,12 +1244,23 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         IsRemoteSessionActive = false;
         IsConnecting = false;
         IsInputEnabled = false;
+        HasReceivedVideoFrame = false;
+        VideoImage = null;
+        ResolutionText = "0 x 0";
+        FpsText = "0.0 FPS";
+        BitrateText = "0 kbps";
         ConnectionPath = ConnectionPath.Unknown;
         ConnectionPathBadge = "⚪ P2P";
         ConnectionPathColor = "#6B7280";
         SecurityStatusBadge = "🔒 Disconnected";
         SecurityStatusColor = "#6B7280";
-        StatusText = "Disconnected.";
+        StatusText = statusMessage ?? "Disconnected.";
+
+        if (!keepModalOpen)
+        {
+            IsConnectionModalOpen = false;
+            IsConnectionModalError = false;
+        }
 
         _clipboardService?.StopMonitoring();
         _clipboardService?.Dispose();
@@ -1098,13 +1278,39 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
         _terminalClientService?.Dispose();
         _terminalClientService = null;
 
-        _dispatcher.Invoke(() =>
+        void ResetUiCollections()
         {
             RemoteDisplays.Clear();
             SelectedRemoteDisplay = null;
             IsFileTransferActive = false;
             IsTerminalSessionActive = false;
-        });
+        }
+
+        if (_dispatcher.CheckAccess())
+        {
+            ResetUiCollections();
+        }
+        else
+        {
+            _ = _dispatcher.BeginInvoke(ResetUiCollections);
+        }
+
+        // Dispose network transport and SignalR off the UI thread so SignalR/SIPSorcery callbacks can never deadlock WPF.
+        if (transport != null || signaling != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                if (transport != null)
+                {
+                    try { await transport.CloseAsync().ConfigureAwait(false); } catch { }
+                }
+
+                if (signaling != null)
+                {
+                    try { await signaling.DisposeAsync().ConfigureAwait(false); } catch { }
+                }
+            });
+        }
     }
 
     private void OnRemoteVideoPacketReceived(ReadOnlyMemory<byte> packet)
@@ -1851,6 +2057,8 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
         _injector = null;
 
+        HasReceivedVideoFrame = false;
+        VideoImage = null;
         IsLoopbackActive = false;
         StatusText = "Loopback stopped.";
     }
@@ -1892,18 +2100,17 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.StatusChanged += () =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(() =>
                 {
                     IsServingIncomingSession = _hostServer.IsServingSession;
-                    if (IsServingIncomingSession)
-                    {
-                        IncomingSessionText = $"🔴 SHARING DESKTOP: Connected with {_hostServer.ActiveViewerName} (ID: {_hostServer.ActiveViewerDeviceId})";
-                    }
+                    IncomingSessionText = IsServingIncomingSession
+                        ? $"🔴 SHARING DESKTOP: Connected with {_hostServer.ActiveViewerName} (ID: {_hostServer.ActiveViewerDeviceId})"
+                        : string.Empty;
                 });
             };
             _hostServer.IncomingSessionStarting += (viewerName, viewerId) =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(() =>
                 {
                     IncomingSessionText = $"⚡ INCOMING CONNECTION: {viewerName} (ID: {viewerId}) is connecting...";
                     IsServingIncomingSession = true;
@@ -1912,10 +2119,20 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.IncomingConnectionPrompt += (viewerName, viewerId) =>
             {
-                _dispatcher.Invoke(() =>
+                _dispatcher.BeginInvoke(() =>
                 {
                     IncomingPromptText = $"Incoming connection request from {viewerName} (ID: {viewerId})";
                     IsIncomingPromptVisible = true;
+                });
+            };
+            _hostServer.IncomingConnectionCancelled += () =>
+            {
+                _dispatcher.BeginInvoke(() =>
+                {
+                    IsIncomingPromptVisible = false;
+                    IsServingIncomingSession = false;
+                    IncomingSessionText = string.Empty;
+                    StatusText = "Incoming connection request was cancelled by the partner.";
                 });
             };
             await _hostServer.StartAsync().ConfigureAwait(false);
