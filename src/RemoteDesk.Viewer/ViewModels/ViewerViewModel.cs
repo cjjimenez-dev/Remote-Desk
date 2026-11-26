@@ -687,7 +687,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             _signalingClient.ConnectionRejected += reason =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     if (attemptId != _connectionAttemptId) return;
 
@@ -707,7 +707,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
             _signalingClient.SessionEndedByPeer += reason =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     if (attemptId != _connectionAttemptId) return;
 
@@ -733,7 +733,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
                 _activeHostDeviceId = res.HostDeviceId;
                 _grantedPermissions = res.GrantedPermissions;
 
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     if (attemptId != _connectionAttemptId) return;
                     GrantedPermissionsText = _grantedPermissions.ToString();
@@ -786,7 +786,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
                     _transport.ConnectionPathChanged += path =>
                     {
-                        _dispatcher.BeginInvoke(() =>
+                        _ = _dispatcher.BeginInvoke(() =>
                         {
                             if (attemptId != _connectionAttemptId) return;
 
@@ -827,7 +827,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
 
                     _transport.StateChanged += state =>
                     {
-                        _dispatcher.BeginInvoke(() =>
+                        _ = _dispatcher.BeginInvoke(() =>
                         {
                             if (attemptId != _connectionAttemptId) return;
 
@@ -2100,7 +2100,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.StatusChanged += () =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     IsServingIncomingSession = _hostServer.IsServingSession;
                     IncomingSessionText = IsServingIncomingSession
@@ -2110,7 +2110,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.IncomingSessionStarting += (viewerName, viewerId) =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     IncomingSessionText = $"⚡ INCOMING CONNECTION: {viewerName} (ID: {viewerId}) is connecting...";
                     IsServingIncomingSession = true;
@@ -2119,7 +2119,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.IncomingConnectionPrompt += (viewerName, viewerId) =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     IncomingPromptText = $"Incoming connection request from {viewerName} (ID: {viewerId})";
                     IsIncomingPromptVisible = true;
@@ -2127,7 +2127,7 @@ public partial class ViewerViewModel : ObservableObject, IDisposable
             };
             _hostServer.IncomingConnectionCancelled += () =>
             {
-                _dispatcher.BeginInvoke(() =>
+                _ = _dispatcher.BeginInvoke(() =>
                 {
                     IsIncomingPromptVisible = false;
                     IsServingIncomingSession = false;

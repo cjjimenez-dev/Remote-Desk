@@ -446,6 +446,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBox Grid.Column="0" Text="{Binding TargetHostId, UpdateSourceTrigger=PropertyChanged}" 
+                                                     AutomationProperties.AutomationId="PartnerIdTextBox"
                                                      FontFamily="Consolas, Cascadia Code, Segoe UI" FontSize="17" FontWeight="Bold"
                                                      Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0" 
                                                      VerticalContentAlignment="Center" Height="38" Padding="10,0">
@@ -454,6 +455,7 @@
                                                 </TextBox.InputBindings>
                                             </TextBox>
                                             <Button Grid.Column="1" Command="{Binding ConnectRemoteCommand}" 
+                                                    AutomationProperties.AutomationId="ConnectRemoteButton"
                                                     Style="{DynamicResource AnyDeskRedButton}" Height="38" Padding="18,0">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="➔ " FontWeight="Bold" FontSize="14"/>
@@ -915,6 +917,7 @@
 
             <!-- Connection Progress & Declined Status Modal Overlay (Emil Design) -->
             <Border Grid.ColumnSpan="2" Background="{DynamicResource ModalBackdropBrush}"
+                    AutomationProperties.AutomationId="ConnectionModalOverlay"
                     Visibility="{Binding IsConnectionModalOpen, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                 <Border Width="440" VerticalAlignment="Center" HorizontalAlignment="Center"
@@ -935,7 +938,8 @@
                                     <TextBlock Text="{Binding ConnectionModalIcon}" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding ConnectionModalTitle}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                    <TextBlock AutomationProperties.AutomationId="ConnectionModalTitleText"
+                                               Text="{Binding ConnectionModalTitle}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
                                     <TextBlock Text="{Binding ConnectionModalSubtitle}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0"/>
                                 </StackPanel>
                             </StackPanel>
@@ -965,26 +969,31 @@
                         <!-- Indeterminate Progress Indicator (Visible while waiting / negotiating) -->
                         <StackPanel Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}" Margin="0,0,0,18">
                             <ProgressBar IsIndeterminate="True" Height="5" Foreground="{DynamicResource BrandSkyBrush}" Background="{DynamicResource InsetBgBrush}" BorderThickness="0" Margin="0,0,0,10"/>
-                            <TextBlock Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                            <TextBlock AutomationProperties.AutomationId="ConnectionModalStageProgressText"
+                                       Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <!-- Declined / Error Reason Banner (Visible on reject / offline / failure) -->
                         <Border Background="#18EF4444" BorderBrush="{DynamicResource BrandRedBorderBrush}" BorderThickness="1"
                                 CornerRadius="8" Padding="12,10" Margin="0,0,0,18"
                                 Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}">
-                            <TextBlock Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}" TextWrapping="Wrap"/>
+                            <TextBlock AutomationProperties.AutomationId="ConnectionModalStageErrorText"
+                                       Text="{Binding ConnectionModalStageText}" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}" TextWrapping="Wrap"/>
                         </Border>
 
                         <!-- Modal Footer Actions -->
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <Button Command="{Binding CancelConnectionAttemptCommand}"
+                            <Button AutomationProperties.AutomationId="CancelConnectionButton"
+                                    Command="{Binding CancelConnectionAttemptCommand}"
                                     Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToInverseVisibilityConverter.Instance}}"
                                     Content="Cancel Request" Style="{DynamicResource AnyDeskRedButton}" Height="32" Padding="16,0"/>
 
-                            <Button Command="{Binding DismissConnectionModalCommand}"
+                            <Button AutomationProperties.AutomationId="CloseConnectionModalButton"
+                                    Command="{Binding DismissConnectionModalCommand}"
                                     Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
                                     Content="Close" Style="{DynamicResource EmilHeaderButton}" Height="32" Padding="14,0" Margin="0,0,8,0"/>
-                            <Button Command="{Binding RetryConnectionModalCommand}"
+                            <Button AutomationProperties.AutomationId="RetryConnectionButton"
+                                    Command="{Binding RetryConnectionModalCommand}"
                                     Visibility="{Binding IsConnectionModalError, Converter={x:Static vm:BooleanToVisibilityConverter.Instance}}"
                                     Content="Try Again" Style="{DynamicResource EmilConnectButton}" Height="32" Padding="16,0"/>
                         </StackPanel>

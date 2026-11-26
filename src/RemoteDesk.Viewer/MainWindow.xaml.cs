@@ -24,7 +24,11 @@ public partial class MainWindow : Window
         _viewModel = new ViewerViewModel(Dispatcher);
         DataContext = _viewModel;
 
-        Closed += (s, e) => _viewModel.Dispose();
+        Closed += (s, e) =>
+        {
+            _viewModel.Dispose();
+            Application.Current?.Shutdown();
+        };
     }
 
     private void OnVideoMouseMove(object sender, MouseEventArgs e)
